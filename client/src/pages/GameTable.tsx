@@ -241,7 +241,7 @@ function PlayerSeat({
 
             {/* Name + Stack */}
             <div className="flex flex-col min-w-0">
-              <span className="text-[12px] font-bold text-white truncate max-w-[80px] leading-tight">
+              <span className="text-[12px] font-bold text-white truncate max-w-[100px] leading-tight">
                 {player.name}
               </span>
               <span className="text-[13px] font-bold text-amber-300 font-mono leading-tight flex items-center gap-1">
@@ -494,7 +494,7 @@ export default function GameTable() {
   const maxSeats = tableConfig ? parseInt(tableConfig.tableSize) : 6;
   const seats = SEATS_6;
   const heroPlayer = gameState?.players.find(p => p.seatIndex === mySeatIndex);
-  const isMyTurn = gameState?.actionSeat === mySeatIndex && mySeatIndex >= 0;
+  const isMyTurn = gameState?.actionSeat === mySeatIndex && mySeatIndex >= 0 && !heroPlayer?.folded;
   const toCall = heroPlayer ? gameState!.currentBet - heroPlayer.currentBet : 0;
   const canCheck = toCall <= 0;
   const totalPot = gameState ? gameState.pots.reduce((s, p) => s + p.amount, 0) + gameState.players.reduce((s, p) => s + p.currentBet, 0) : 0;
@@ -573,11 +573,11 @@ export default function GameTable() {
           <PokerTableSVG isDark={isDark} />
         </div>
 
-        {/* "TEXAS HOLD'EM" center text */}
-        <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none z-5" style={{ top: '55%' }}>
-          <span className="text-[13px] font-bold tracking-[0.4em] uppercase"
-            style={{ color: 'rgba(212,175,55,0.2)', fontFamily: "'Playfair Display', serif", textShadow: '0 0 20px rgba(212,175,55,0.1)' }}>
-            Texas Hold'em
+        {/* "HOUSE POKER" center text */}
+        <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none z-5" style={{ top: '57%' }}>
+          <span className="text-[14px] font-bold tracking-[0.4em] uppercase"
+            style={{ color: 'rgba(212,175,55,0.25)', fontFamily: "'Playfair Display', serif", textShadow: '0 0 20px rgba(212,175,55,0.1)' }}>
+            House Poker
           </span>
         </div>
 
@@ -585,7 +585,7 @@ export default function GameTable() {
         {totalPot > 0 && (
           <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full"
             style={{
-              top: '28%',
+              top: '30%',
               background: 'rgba(0,0,0,0.6)',
               border: '1px solid rgba(212,175,55,0.25)',
               backdropFilter: 'blur(8px)',
@@ -600,7 +600,7 @@ export default function GameTable() {
         {/* ─── Community Cards ─── */}
         {gameState && gameState.communityCards.length > 0 && (
           <div className="absolute left-1/2 z-20 flex items-center justify-center gap-1.5"
-            style={{ top: '35%', transform: 'translate(-50%, -50%)' }}>
+            style={{ top: '42%', transform: 'translate(-50%, -50%)' }}>
             {gameState.communityCards.map((card, i) => (
               <PokerCard key={`cc-${i}`} card={card} size="lg" delay={i * 0.08} />
             ))}

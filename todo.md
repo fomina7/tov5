@@ -229,3 +229,11 @@
 - [x] Verify game works end-to-end
 - [x] Verify tournaments work end-to-end
 - [x] Verify admin panel works end-to-end
+
+## v10 - User Feedback Fixes
+- [x] Change table text from "TEXAS HOLD'EM" to "HOUSE POKER"
+- [x] Move community cards lower (42% from 35%) for better visibility
+- [x] Move pot display lower (30% from 28%)
+- [x] Fix bug: action buttons showing when hero is folded
+- [x] Increase player name max-width from 80px to 100px
+- [x] Verify game is fully functional with real gameplay (hands complete, bots play, showdowns work)
