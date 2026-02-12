@@ -305,6 +305,21 @@
 - [x] Verify hands complete properly (preflop->flop->turn->river->showdown)
 - [x] Verify balance updates after wins/losses
 - [x] Fix all server errors (passwordHash column issue - migration applied)
-- [ ] Test all pages: Home, Lobby, Game, Tournaments, Profile, Cashier, Admin
+- [x] Test all pages: Home, Lobby, Game, Tournaments, Profile, Cashier, Admin
 - [x] Ensure all buttons are clickable and functional
-- [ ] Push to GitHub
+- [x] Push to GitHub
+
+## v13 - Railway Deployment
+- [x] Create MySQL database on Railway
+- [x] Refactor server to work without Manus infrastructure
+- [x] Replace Manus OAuth with standalone JWT auth (email/password + guest + Telegram)
+- [x] Create Dockerfile for production build
+- [x] Embed database migrations in server startup
+- [x] Configure Railway environment variables (DATABASE_URL, JWT_SECRET, PORT, etc.)
+- [x] Fix production build (exclude vite from bundle)
+- [x] Fix port mismatch (Railway expects 8080)
+- [x] Verify deployment: Home page loads
+- [x] Verify deployment: Guest login works
+- [x] Verify deployment: Lobby shows tables
+- [x] Verify deployment: Game table works with bots
+- [x] Verify deployment: Cards dealt, actions work (FOLD/CHECK/RAISE/ALL-IN)
