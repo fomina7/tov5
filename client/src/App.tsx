@@ -11,6 +11,7 @@ import Profile from "./pages/Profile";
 import Tournaments from "./pages/Tournaments";
 import Cashier from "./pages/Cashier";
 import More from "./pages/More";
+import Admin from "./pages/Admin";
 
 function Router() {
   return (
@@ -22,6 +23,7 @@ function Router() {
       <Route path="/tournaments" component={Tournaments} />
       <Route path="/cashier" component={Cashier} />
       <Route path="/more" component={More} />
+      <Route path="/admin" component={Admin} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

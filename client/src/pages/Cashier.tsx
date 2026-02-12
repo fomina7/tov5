@@ -1,25 +1,88 @@
-/*
- * Cashier — Cyber Noir Casino theme
- * Deposit, withdraw, buy chips, daily bonus
+/**
+ * Cashier — HOUSE POKER
+ * Real balance from DB, deposit/withdraw with tRPC, transaction history
  */
 import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Gift, ArrowDownToLine, ArrowUpFromLine, ShoppingCart, Sparkles, Wallet, CreditCard } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Gift, ArrowDownToLine, ArrowUpFromLine, History, Wallet, CreditCard, Copy, Check } from 'lucide-react';
 import { ASSETS } from '@/lib/assets';
-import BottomNav from '@/components/BottomNav';
+import { useAuth } from '@/_core/hooks/useAuth';
+import { trpc } from '@/lib/trpc';
+import { getLoginUrl } from '@/const';
 import { toast } from 'sonner';
-
-const CHIP_PACKAGES = [
-  { amount: 1000, price: '$0.99', bonus: 0, popular: false },
-  { amount: 5000, price: '$4.99', bonus: 500, popular: false },
-  { amount: 15000, price: '$9.99', bonus: 2000, popular: true },
-  { amount: 50000, price: '$29.99', bonus: 10000, popular: false },
-  { amount: 150000, price: '$79.99', bonus: 40000, popular: false },
-  { amount: 500000, price: '$199.99', bonus: 150000, popular: false },
-];
+import BottomNav from '@/components/BottomNav';
 
 export default function Cashier() {
-  const [activeTab, setActiveTab] = useState<'shop' | 'deposit' | 'withdraw'>('shop');
+  const { user, isAuthenticated, loading } = useAuth();
+  const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'history'>('deposit');
+  const [depositAmount, setDepositAmount] = useState('');
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawAddress, setWithdrawAddress] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const { data: balance, refetch: refetchBalance } = trpc.balance.get.useQuery(undefined, {
+    enabled: isAuthenticated,
+    retry: false,
+  });
+
+  const { data: txHistory } = trpc.balance.transactions.useQuery(
+    { limit: 20, offset: 0 },
+    { enabled: isAuthenticated && activeTab === 'history', retry: false }
+  );
+
+  const requestDeposit = trpc.balance.requestDeposit.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Deposit request created! Transaction #${data.transactionId}`);
+      setDepositAmount('');
+      refetchBalance();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const requestWithdraw = trpc.balance.requestWithdraw.useMutation({
+    onSuccess: () => {
+      toast.success('Withdrawal request submitted! Admin will process it shortly.');
+      setWithdrawAmount('');
+      setWithdrawAddress('');
+      refetchBalance();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{
+        background: 'radial-gradient(ellipse at top, #0d1117 0%, #080a0f 50%, #050507 100%)',
+      }}>
+        <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 pb-24" style={{
+        background: 'radial-gradient(ellipse at top, #0d1117 0%, #080a0f 50%, #050507 100%)',
+      }}>
+        <CreditCard size={48} className="text-gold opacity-50" />
+        <h2 className="text-lg font-bold text-white">Sign In Required</h2>
+        <p className="text-sm text-gray-400">Please sign in to access the cashier</p>
+        <a href={getLoginUrl()} className="btn-primary-poker px-8 py-3 rounded-xl text-sm font-bold">
+          SIGN IN
+        </a>
+        <BottomNav />
+      </div>
+    );
+  }
+
+  const glassCard = {
+    background: 'rgba(10, 10, 20, 0.7)',
+    backdropFilter: 'blur(12px)',
+    border: '1px solid rgba(255,255,255,0.06)',
+  };
+
+  // Placeholder deposit address (in production, generate per-user)
+  const depositAddress = 'UQBv...HOUSE_POKER_DEPOSIT';
 
   return (
     <div className="min-h-screen pb-24" style={{
@@ -36,7 +99,6 @@ export default function Cashier() {
             border: '1px solid rgba(212, 175, 55, 0.25)',
           }}
         >
-          {/* Subtle animated glow */}
           <motion.div
             className="absolute -top-10 -right-10 w-32 h-32 rounded-full"
             style={{ background: 'radial-gradient(circle, rgba(212, 175, 55, 0.08) 0%, transparent 70%)' }}
@@ -48,15 +110,15 @@ export default function Cashier() {
           <div className="flex items-center gap-3 mb-3 relative z-10">
             <img src={ASSETS.ui.coin} alt="" className="w-8 h-8" />
             <span className="text-3xl font-bold text-gold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-              10,000
+              {balance ? balance.balanceReal.toLocaleString() : '---'}
             </span>
           </div>
           <div className="flex items-center gap-2 relative z-10">
             <img src={ASSETS.ui.gem} alt="" className="w-5 h-5" />
             <span className="text-lg font-bold" style={{ fontFamily: "'JetBrains Mono', monospace", color: '#00F0FF' }}>
-              250
+              {balance ? balance.balanceBonus.toLocaleString() : '---'}
             </span>
-            <span className="text-xs text-gray-500 ml-1">Gems</span>
+            <span className="text-xs text-gray-500 ml-1">Bonus</span>
           </div>
         </motion.div>
 
@@ -65,7 +127,7 @@ export default function Cashier() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          onClick={() => toast.success('Daily bonus claimed! +500 chips')}
+          onClick={() => toast.info('Daily bonus feature coming soon')}
           className="w-full rounded-xl p-4 mb-5 flex items-center gap-3"
           style={{
             background: 'linear-gradient(135deg, rgba(0, 200, 0, 0.08) 0%, rgba(0, 240, 255, 0.03) 100%)',
@@ -81,7 +143,7 @@ export default function Cashier() {
           </div>
           <div className="flex-1 text-left">
             <div className="text-sm font-bold text-green-400">Daily Bonus</div>
-            <div className="text-xs text-gray-400">Claim your free 500 chips!</div>
+            <div className="text-xs text-gray-400">Claim your free chips!</div>
           </div>
           <div className="px-4 py-2 rounded-lg text-sm font-bold" style={{
             background: 'rgba(0, 200, 0, 0.15)',
@@ -98,9 +160,9 @@ export default function Cashier() {
           border: '1px solid rgba(255,255,255,0.04)',
         }}>
           {[
-            { key: 'shop' as const, label: 'Shop', icon: ShoppingCart },
             { key: 'deposit' as const, label: 'Deposit', icon: ArrowDownToLine },
             { key: 'withdraw' as const, label: 'Withdraw', icon: ArrowUpFromLine },
+            { key: 'history' as const, label: 'History', icon: History },
           ].map((tab) => {
             const Icon = tab.icon;
             return (
@@ -108,9 +170,7 @@ export default function Cashier() {
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
                 className={`flex-1 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                  activeTab === tab.key
-                    ? 'btn-primary-poker'
-                    : 'text-gray-500 hover:text-gray-300'
+                  activeTab === tab.key ? 'btn-primary-poker' : 'text-gray-500 hover:text-gray-300'
                 }`}
               >
                 <Icon size={14} />
@@ -120,106 +180,190 @@ export default function Cashier() {
           })}
         </div>
 
-        {/* Shop content */}
-        {activeTab === 'shop' && (
-          <div className="grid grid-cols-2 gap-3">
-            {CHIP_PACKAGES.map((pkg, i) => (
-              <motion.button
-                key={pkg.amount}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: i * 0.05 }}
-                onClick={() => toast.info('Feature coming soon')}
-                className="rounded-xl p-3 text-center relative overflow-hidden"
-                style={{
-                  background: pkg.popular
-                    ? 'linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(0, 0, 0, 0.5) 100%)'
-                    : 'rgba(10, 10, 20, 0.7)',
-                  border: pkg.popular ? '2px solid rgba(212, 175, 55, 0.4)' : '1px solid rgba(255,255,255,0.06)',
-                  backdropFilter: 'blur(12px)',
-                }}
-                whileTap={{ scale: 0.95 }}
-              >
-                {pkg.popular && (
-                  <div className="absolute top-0 right-0 px-2 py-0.5 rounded-bl-lg" style={{
-                    background: 'linear-gradient(135deg, #D4AF37, #B8941F)',
-                  }}>
-                    <span className="text-[8px] font-bold text-black">BEST VALUE</span>
-                  </div>
-                )}
-                <img src={ASSETS.chips.gold} alt="" className="w-10 h-10 mx-auto mb-2" />
-                <div className="text-lg font-bold text-white" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                  {pkg.amount.toLocaleString()}
-                </div>
-                {pkg.bonus > 0 && (
-                  <div className="text-[10px] text-green-400 flex items-center justify-center gap-0.5">
-                    <Sparkles size={10} /> +{pkg.bonus.toLocaleString()} bonus
-                  </div>
-                )}
-                <div className="mt-2 py-1.5 rounded-lg text-sm font-bold" style={{
-                  background: 'rgba(212, 175, 55, 0.1)',
-                  color: '#D4AF37',
-                  border: '1px solid rgba(212, 175, 55, 0.2)',
-                }}>
-                  {pkg.price}
-                </div>
-              </motion.button>
-            ))}
-          </div>
-        )}
-
         {/* Deposit */}
         {activeTab === 'deposit' && (
-          <div className="rounded-xl p-8 text-center" style={{
-            background: 'rgba(10, 10, 20, 0.7)',
-            backdropFilter: 'blur(12px)',
-            border: '1px solid rgba(212, 175, 55, 0.15)',
-          }}>
-            <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{
-              background: 'rgba(212, 175, 55, 0.1)',
-              border: '1px solid rgba(212, 175, 55, 0.2)',
-            }}>
-              <CreditCard size={28} className="text-gold" />
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            <div className="rounded-xl p-4" style={glassCard}>
+              <h3 className="text-sm font-bold text-white mb-3">Deposit Amount</h3>
+
+              {/* Quick amounts */}
+              <div className="grid grid-cols-4 gap-2 mb-3">
+                {[100, 500, 1000, 5000].map(amt => (
+                  <button
+                    key={amt}
+                    onClick={() => setDepositAmount(amt.toString())}
+                    className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                      depositAmount === amt.toString()
+                        ? 'bg-gold/20 text-gold border border-gold/30'
+                        : 'bg-white/5 text-gray-400 border border-white/10'
+                    }`}
+                  >
+                    {amt.toLocaleString()}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="number"
+                value={depositAmount}
+                onChange={e => setDepositAmount(e.target.value)}
+                placeholder="Enter amount..."
+                className="w-full px-3 py-2.5 rounded-lg text-sm bg-black/40 border border-white/10 text-white mb-3"
+              />
+
+              <button
+                onClick={() => {
+                  const amt = parseInt(depositAmount);
+                  if (!amt || amt < 1) return toast.error('Enter a valid amount');
+                  requestDeposit.mutate({ amount: amt });
+                }}
+                disabled={requestDeposit.isPending}
+                className="w-full py-3 rounded-xl text-sm font-bold btn-primary-poker tracking-wider disabled:opacity-50"
+                style={{ fontFamily: "'Orbitron', sans-serif" }}
+              >
+                {requestDeposit.isPending ? 'Processing...' : 'REQUEST DEPOSIT'}
+              </button>
+
+              <p className="text-[10px] text-gray-500 mt-2 text-center">
+                Deposits are processed by admin. Your balance will be updated after approval.
+              </p>
             </div>
-            <h3 className="text-lg font-bold text-white mb-2">Deposit Funds</h3>
-            <p className="text-sm text-gray-400 mb-4">
-              Connect your TON wallet to deposit cryptocurrency
-            </p>
-            <button
-              onClick={() => toast.info('Feature coming soon')}
-              className="btn-primary-poker px-6 py-3 rounded-xl text-sm font-bold tracking-wider"
-              style={{ fontFamily: "'Orbitron', sans-serif" }}
-            >
-              CONNECT WALLET
-            </button>
-          </div>
+
+            {/* Deposit address info */}
+            <div className="rounded-xl p-4" style={glassCard}>
+              <h3 className="text-sm font-bold text-white mb-2">Deposit Address (USDT/TON)</h3>
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-black/30 border border-white/5">
+                <code className="text-xs text-gray-300 flex-1 truncate">{depositAddress}</code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(depositAddress);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                    toast.success('Address copied!');
+                  }}
+                  className="p-1.5 rounded"
+                >
+                  {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} className="text-gray-400" />}
+                </button>
+              </div>
+              <p className="text-[10px] text-gray-500 mt-2">
+                Send USDT (TRC-20) or TON to this address, then submit a deposit request above.
+              </p>
+            </div>
+          </motion.div>
         )}
 
         {/* Withdraw */}
         {activeTab === 'withdraw' && (
-          <div className="rounded-xl p-8 text-center" style={{
-            background: 'rgba(10, 10, 20, 0.7)',
-            backdropFilter: 'blur(12px)',
-            border: '1px solid rgba(255,255,255,0.06)',
-          }}>
-            <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{
-              background: 'rgba(0, 240, 255, 0.08)',
-              border: '1px solid rgba(0, 240, 255, 0.15)',
-            }}>
-              <Wallet size={28} style={{ color: '#00F0FF' }} />
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl p-4"
+            style={glassCard}
+          >
+            <h3 className="text-sm font-bold text-white mb-3">Withdraw Funds</h3>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Amount</label>
+                <input
+                  type="number"
+                  value={withdrawAmount}
+                  onChange={e => setWithdrawAmount(e.target.value)}
+                  placeholder="Enter amount..."
+                  className="w-full px-3 py-2.5 rounded-lg text-sm bg-black/40 border border-white/10 text-white"
+                />
+                <div className="flex justify-between mt-1">
+                  <span className="text-[10px] text-gray-500">Min: 100</span>
+                  <span className="text-[10px] text-gray-400">
+                    Available: <span className="text-gold">{balance?.balanceReal.toLocaleString() || 0}</span>
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Wallet Address</label>
+                <input
+                  type="text"
+                  value={withdrawAddress}
+                  onChange={e => setWithdrawAddress(e.target.value)}
+                  placeholder="Enter your wallet address..."
+                  className="w-full px-3 py-2.5 rounded-lg text-sm bg-black/40 border border-white/10 text-white"
+                />
+              </div>
+
+              <button
+                onClick={() => {
+                  const amt = parseInt(withdrawAmount);
+                  if (!amt || amt < 100) return toast.error('Minimum withdrawal is 100');
+                  if (!withdrawAddress || withdrawAddress.length < 10) return toast.error('Enter a valid wallet address');
+                  if (balance && amt > balance.balanceReal) return toast.error('Insufficient balance');
+                  requestWithdraw.mutate({ amount: amt, walletAddress: withdrawAddress });
+                }}
+                disabled={requestWithdraw.isPending}
+                className="w-full py-3 rounded-xl text-sm font-bold tracking-wider disabled:opacity-50"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(0, 240, 255, 0.15), rgba(0, 200, 255, 0.05))',
+                  color: '#00F0FF',
+                  border: '1px solid rgba(0, 240, 255, 0.3)',
+                  fontFamily: "'Orbitron', sans-serif",
+                }}
+              >
+                {requestWithdraw.isPending ? 'Processing...' : 'REQUEST WITHDRAWAL'}
+              </button>
+
+              <p className="text-[10px] text-gray-500 text-center">
+                Withdrawals are processed within 24 hours by admin.
+              </p>
             </div>
-            <h3 className="text-lg font-bold text-white mb-2">Withdraw Funds</h3>
-            <p className="text-sm text-gray-400 mb-4">
-              Withdraw your winnings to your TON wallet
-            </p>
-            <button
-              onClick={() => toast.info('Feature coming soon')}
-              className="btn-primary-poker px-6 py-3 rounded-xl text-sm font-bold tracking-wider"
-              style={{ fontFamily: "'Orbitron', sans-serif" }}
-            >
-              WITHDRAW
-            </button>
-          </div>
+          </motion.div>
+        )}
+
+        {/* Transaction History */}
+        {activeTab === 'history' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-2"
+          >
+            {txHistory && txHistory.length > 0 ? (
+              txHistory.map((tx) => (
+                <div key={tx.id} className="rounded-xl p-3" style={glassCard}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-white capitalize">
+                        {tx.type.replace('_', ' ')}
+                      </div>
+                      <div className="text-[10px] text-gray-500">
+                        {new Date(tx.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className={`text-sm font-bold ${tx.amount >= 0 ? 'text-green-400' : 'text-red-400'}`}
+                        style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                        {tx.amount >= 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                      </div>
+                      <div className={`text-[10px] px-1.5 py-0.5 rounded inline-block ${
+                        tx.status === 'completed' ? 'bg-green-900/30 text-green-400' :
+                        tx.status === 'pending' ? 'bg-yellow-900/30 text-yellow-400' :
+                        'bg-red-900/30 text-red-400'
+                      }`}>
+                        {tx.status}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-12 text-gray-500 text-sm">
+                No transactions yet
+              </div>
+            )}
+          </motion.div>
         )}
       </div>
 
