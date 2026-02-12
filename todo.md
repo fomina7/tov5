@@ -337,3 +337,10 @@
 - [x] Verify bots continue playing after player joins (tested - bots play all phases)
 - [x] Verify full hand completes without freezing (tested PRE-FLOP→FLOP→TURN→RIVER→SHOWDOWN)
 - [x] Test multiple hands in succession (tested Hand #1 through #4+, all work)
+
+## v16 - Fix Game Freezing Issue
+- [ ] Diagnose why game constantly freezes during play on Railway
+- [ ] Fix root cause of game freeze/hang
+- [ ] Add safety mechanisms to prevent future freezes (watchdog timer, auto-recovery)
+- [ ] Test multiple hands in succession without freezing
+- [ ] Verify game works reliably on Railway

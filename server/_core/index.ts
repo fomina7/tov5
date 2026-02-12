@@ -158,6 +158,84 @@ async function startServer() {
     })
   );
 
+  // ─── HTTP Game API (fallback for socket.io issues on Railway) ───
+  // Helper to extract user from JWT token
+  async function extractUserFromRequest(req: express.Request): Promise<{ openId: string; name: string } | null> {
+    const authHeader = req.headers.authorization;
+    let token: string | undefined;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.slice(7);
+    }
+    if (!token) return null;
+    try {
+      const { jwtVerify: jv } = await import("jose");
+      const { ENV: env } = await import("./env");
+      const secretKey = new TextEncoder().encode(env.cookieSecret);
+      const { payload } = await jv(token, secretKey, { algorithms: ["HS256"] });
+      const { openId, name } = payload as Record<string, unknown>;
+      if (typeof openId !== "string" || !openId) return null;
+      return { openId, name: (typeof name === "string" ? name : "") || "" };
+    } catch {
+      return null;
+    }
+  }
+
+  async function getUserIdFromOpenId(openId: string): Promise<number | null> {
+    const { getUserByOpenId } = await import("../db");
+    const user = await getUserByOpenId(openId);
+    return user ? user.id : null;
+  }
+
+  // GET /api/game/:tableId/state - Get current game state for authenticated user
+  app.get("/api/game/:tableId/state", async (req, res) => {
+    try {
+      const session = await extractUserFromRequest(req);
+      if (!session) return res.status(401).json({ error: "Unauthorized" });
+      const userId = await getUserIdFromOpenId(session.openId);
+      if (!userId) return res.status(401).json({ error: "User not found" });
+      const tableId = parseInt(req.params.tableId);
+      const result = gameManager.getTableStateForUser(tableId, userId);
+      if (!result) return res.json({ state: null, seatIndex: -1 });
+      return res.json(result);
+    } catch (err) {
+      console.error("[HTTP-Game] Error getting state:", err);
+      return res.status(500).json({ error: "Internal error" });
+    }
+  });
+
+  // POST /api/game/:tableId/join - Join a table via HTTP
+  app.post("/api/game/:tableId/join", async (req, res) => {
+    try {
+      const session = await extractUserFromRequest(req);
+      if (!session) return res.status(401).json({ error: "Unauthorized" });
+      const userId = await getUserIdFromOpenId(session.openId);
+      if (!userId) return res.status(401).json({ error: "User not found" });
+      const tableId = parseInt(req.params.tableId);
+      const result = await gameManager.httpJoinTable(tableId, userId);
+      return res.json(result);
+    } catch (err) {
+      console.error("[HTTP-Game] Error joining table:", err);
+      return res.status(500).json({ error: "Internal error" });
+    }
+  });
+
+  // POST /api/game/:tableId/action - Perform a game action via HTTP
+  app.post("/api/game/:tableId/action", async (req, res) => {
+    try {
+      const session = await extractUserFromRequest(req);
+      if (!session) return res.status(401).json({ error: "Unauthorized" });
+      const userId = await getUserIdFromOpenId(session.openId);
+      if (!userId) return res.status(401).json({ error: "User not found" });
+      const tableId = parseInt(req.params.tableId);
+      const { action, amount } = req.body;
+      const result = gameManager.processHttpAction(tableId, userId, action, amount);
+      return res.json(result);
+    } catch (err) {
+      console.error("[HTTP-Game] Error processing action:", err);
+      return res.status(500).json({ error: "Internal error" });
+    }
+  });
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     // Dynamic import to avoid bundling vite in production
