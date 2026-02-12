@@ -1,0 +1,110 @@
+{
+  "query": "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'users' ORDER BY ORDINAL_POSITION;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user JPPi4KWSC9uSqwy.e50ca6cb3452 --database diCBEAZbwppvACD82XAuCX --execute SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'users' ORDER BY ORDINAL_POSITION;",
+  "rows": [
+    {
+      "COLUMN_NAME": "id",
+      "DATA_TYPE": "int"
+    },
+    {
+      "COLUMN_NAME": "openId",
+      "DATA_TYPE": "varchar"
+    },
+    {
+      "COLUMN_NAME": "name",
+      "DATA_TYPE": "text"
+    },
+    {
+      "COLUMN_NAME": "email",
+      "DATA_TYPE": "varchar"
+    },
+    {
+      "COLUMN_NAME": "loginMethod",
+      "DATA_TYPE": "varchar"
+    },
+    {
+      "COLUMN_NAME": "role",
+      "DATA_TYPE": "enum"
+    },
+    {
+      "COLUMN_NAME": "createdAt",
+      "DATA_TYPE": "timestamp"
+    },
+    {
+      "COLUMN_NAME": "updatedAt",
+      "DATA_TYPE": "timestamp"
+    },
+    {
+      "COLUMN_NAME": "lastSignedIn",
+      "DATA_TYPE": "timestamp"
+    },
+    {
+      "COLUMN_NAME": "avatar",
+      "DATA_TYPE": "varchar"
+    },
+    {
+      "COLUMN_NAME": "nickname",
+      "DATA_TYPE": "varchar"
+    },
+    {
+      "COLUMN_NAME": "balanceReal",
+      "DATA_TYPE": "bigint"
+    },
+    {
+      "COLUMN_NAME": "balanceBonus",
+      "DATA_TYPE": "bigint"
+    },
+    {
+      "COLUMN_NAME": "tournamentTickets",
+      "DATA_TYPE": "int"
+    },
+    {
+      "COLUMN_NAME": "handsPlayed",
+      "DATA_TYPE": "int"
+    },
+    {
+      "COLUMN_NAME": "handsWon",
+      "DATA_TYPE": "int"
+    },
+    {
+      "COLUMN_NAME": "totalWinnings",
+      "DATA_TYPE": "bigint"
+    },
+    {
+      "COLUMN_NAME": "totalLosses",
+      "DATA_TYPE": "bigint"
+    },
+    {
+      "COLUMN_NAME": "level",
+      "DATA_TYPE": "int"
+    },
+    {
+      "COLUMN_NAME": "xp",
+      "DATA_TYPE": "int"
+    },
+    {
+      "COLUMN_NAME": "rakebackBalance",
+      "DATA_TYPE": "bigint"
+    },
+    {
+      "COLUMN_NAME": "totalRakeGenerated",
+      "DATA_TYPE": "bigint"
+    },
+    {
+      "COLUMN_NAME": "rakebackPercentage",
+      "DATA_TYPE": "int"
+    },
+    {
+      "COLUMN_NAME": "passwordHash",
+      "DATA_TYPE": "varchar"
+    },
+    {
+      "COLUMN_NAME": "telegramId",
+      "DATA_TYPE": "varchar"
+    }
+  ],
+  "messages": [],
+  "stdout": "COLUMN_NAME\tDATA_TYPE\nid\tint\nopenId\tvarchar\nname\ttext\nemail\tvarchar\nloginMethod\tvarchar\nrole\tenum\ncreatedAt\ttimestamp\nupdatedAt\ttimestamp\nlastSignedIn\ttimestamp\navatar\tvarchar\nnickname\tvarchar\nbalanceReal\tbigint\nbalanceBonus\tbigint\ntournamentTickets\tint\nhandsPlayed\tint\nhandsWon\tint\ntotalWinnings\tbigint\ntotalLosses\tbigint\nlevel\tint\nxp\tint\nrakebackBalance\tbigint\ntotalRakeGenerated\tbigint\nrakebackPercentage\tint\npasswordHash\tvarchar\ntelegramId\tvarchar\n",
+  "stderr": "",
+  "execution_time_ms": 351
+}

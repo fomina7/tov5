@@ -1,6 +1,7 @@
 /**
  * useSocket — WebSocket hook for real-time poker game
  * Connects to the server via socket.io for live game state updates
+ * Includes reconnection handling, heartbeat, and state sync
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
@@ -39,6 +40,8 @@ export interface ServerGameState {
   players: ServerPlayer[];
   mySeatIndex: number; // Server tells us which seat is ours
   serverTime: number;  // Server timestamp for timer sync
+  totalPot?: number;
+  rakeCollected?: number;
 }
 
 export function useSocket() {
@@ -50,22 +53,44 @@ export function useSocket() {
   const [chatMessages, setChatMessages] = useState<{ socketId: string; message: string; timestamp: number }[]>([]);
   // Track server-client time offset for accurate timer
   const timeOffsetRef = useRef<number>(0);
+  // Track the pending join info for auto-rejoin on reconnect
+  const pendingJoinRef = useRef<{ tableId: number; userId: number } | null>(null);
+  // Track reconnection count
+  const reconnectCountRef = useRef(0);
 
   useEffect(() => {
     const socket = io({
       path: '/api/socket.io',
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
     });
 
     socketRef.current = socket;
 
     socket.on('connect', () => {
+      console.log('[WS] Connected:', socket.id);
       setConnected(true);
       setError(null);
+
+      // Auto-rejoin table on reconnect
+      if (pendingJoinRef.current) {
+        reconnectCountRef.current++;
+        console.log(`[WS] Auto-rejoining table ${pendingJoinRef.current.tableId} (reconnect #${reconnectCountRef.current})`);
+        socket.emit('join_table', pendingJoinRef.current);
+      }
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
+      console.log('[WS] Disconnected:', reason);
       setConnected(false);
+    });
+
+    socket.on('connect_error', (err) => {
+      console.log('[WS] Connection error:', err.message);
     });
 
     // Server confirms our seat assignment
@@ -87,15 +112,21 @@ export function useSocket() {
       setGameState(state);
     });
 
-    // Spectator state — only used if we're not seated
+    // Spectator state — used if we're not seated
+    // Always accept spectator state if we don't have a personalized game_state
     socket.on('spectator_state', (state: ServerGameState) => {
       setGameState(prev => {
-        if (prev && prev.mySeatIndex >= 0) return prev; // keep personalized state
+        // If we have a personalized state for the same hand, keep it
+        // But if the spectator state is for a newer hand, accept it
+        if (prev && prev.mySeatIndex >= 0 && prev.handNumber >= state.handNumber) {
+          return prev;
+        }
         return state;
       });
     });
 
     socket.on('error', (data: { message: string }) => {
+      console.log('[WS] Error:', data.message);
       setError(data.message);
     });
 
@@ -103,19 +134,29 @@ export function useSocket() {
       setChatMessages(prev => [...prev.slice(-50), msg]);
     });
 
+    // Periodic state request to prevent stale state
+    const stateRefreshInterval = setInterval(() => {
+      if (socket.connected && pendingJoinRef.current) {
+        socket.emit('request_state', { tableId: pendingJoinRef.current.tableId });
+      }
+    }, 10000); // Every 10 seconds
+
     return () => {
+      clearInterval(stateRefreshInterval);
       socket.disconnect();
     };
   }, []);
 
   const joinTable = useCallback((tableId: number, userId: number, seatIndex?: number) => {
+    // Save join info for auto-rejoin on reconnect
+    pendingJoinRef.current = { tableId, userId };
     if (socketRef.current) {
       socketRef.current.emit('join_table', { tableId, userId, seatIndex });
-      // Don't set mySeatIndex here — wait for server's seat_assigned event
     }
   }, []);
 
   const leaveTable = useCallback((tableId: number) => {
+    pendingJoinRef.current = null; // Clear auto-rejoin
     if (socketRef.current) {
       socketRef.current.emit('leave_table', { tableId });
       setGameState(null);

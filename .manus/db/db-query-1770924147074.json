@@ -1,0 +1,26 @@
+{
+  "query": "SHOW COLUMNS FROM users WHERE Field IN ('passwordHash', 'password_hash', 'telegramId', 'telegram_id');",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user JPPi4KWSC9uSqwy.e50ca6cb3452 --database diCBEAZbwppvACD82XAuCX --execute SHOW COLUMNS FROM users WHERE Field IN ('passwordHash', 'password_hash', 'telegramId', 'telegram_id');",
+  "rows": [
+    {
+      "Field": "passwordHash",
+      "Type": "varchar(256)",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "telegramId",
+      "Type": "varchar(64)",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    }
+  ],
+  "messages": [],
+  "stdout": "Field\tType\tNull\tKey\tDefault\tExtra\npasswordHash\tvarchar(256)\tYES\t\tNULL\t\ntelegramId\tvarchar(64)\tYES\t\tNULL\t\n",
+  "stderr": "",
+  "execution_time_ms": 381
+}

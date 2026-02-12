@@ -296,3 +296,15 @@
 ### Final
 - [ ] Full end-to-end testing
 - [ ] Push to GitHub
+
+## v12 - Critical Bug Fixes & Full Functionality
+- [x] CRITICAL: Fix poker game not working - diagnose and fix (WebSocket reconnection, stale socket handling)
+- [x] Verify player can join table and play
+- [x] Verify cards are dealt correctly
+- [x] Verify action buttons work (fold, call, raise, check, all-in)
+- [x] Verify hands complete properly (preflop->flop->turn->river->showdown)
+- [x] Verify balance updates after wins/losses
+- [x] Fix all server errors (passwordHash column issue - migration applied)
+- [ ] Test all pages: Home, Lobby, Game, Tournaments, Profile, Cashier, Admin
+- [x] Ensure all buttons are clickable and functional
+- [ ] Push to GitHub

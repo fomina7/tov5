@@ -67,7 +67,7 @@ export default function Cashier() {
         <CreditCard size={48} className="text-gold opacity-50" />
         <h2 className="text-lg font-bold text-white">Sign In Required</h2>
         <p className="text-sm text-gray-400">Please sign in to access the cashier</p>
-        <a href={getLoginUrl()} className="btn-primary-poker px-8 py-3 rounded-xl text-sm font-bold">
+        <a href="/login" className="btn-primary-poker px-8 py-3 rounded-xl text-sm font-bold">
           SIGN IN
         </a>
         <BottomNav />

@@ -64,7 +64,7 @@ export default function Profile() {
           Create your profile, track stats, and compete with real players
         </p>
         <a
-          href={getLoginUrl()}
+          href="/login"
           className="btn-primary-poker px-8 py-3 rounded-xl text-sm font-bold tracking-wider"
           style={{ fontFamily: "'Orbitron', sans-serif" }}
         >

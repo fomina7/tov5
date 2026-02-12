@@ -1,0 +1,16 @@
+{
+  "query": "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'users' AND COLUMN_NAME LIKE '%password%' OR COLUMN_NAME LIKE '%telegram%' AND TABLE_NAME = 'users';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user JPPi4KWSC9uSqwy.e50ca6cb3452 --database diCBEAZbwppvACD82XAuCX --execute SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'users' AND COLUMN_NAME LIKE '%password%' OR COLUMN_NAME LIKE '%telegram%' AND TABLE_NAME = 'users';",
+  "rows": [
+    {
+      "COLUMN_NAME": "passwordHash"
+    },
+    {
+      "COLUMN_NAME": "telegramId"
+    }
+  ],
+  "messages": [],
+  "stdout": "COLUMN_NAME\npasswordHash\ntelegramId\n",
+  "stderr": "",
+  "execution_time_ms": 369
+}

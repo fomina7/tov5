@@ -39,6 +39,8 @@ class GameManager {
     this.io = new SocketServer(httpServer, {
       cors: { origin: "*", methods: ["GET", "POST"] },
       path: "/api/socket.io",
+      pingTimeout: 30000,
+      pingInterval: 10000,
     });
 
     this.io.on("connection", (socket: Socket) => {
@@ -68,6 +70,18 @@ class GameManager {
         const room = this.tables.get(data.tableId);
         if (room) {
           socket.emit("admin_state", sanitizeForAdmin(room.state));
+        }
+      });
+
+      // Client can request current state (prevents stale UI)
+      socket.on("request_state", (data: { tableId: number }) => {
+        const room = this.tables.get(data.tableId);
+        if (!room) return;
+        const seatIndex = (socket as any).__seatIndex;
+        if (seatIndex !== undefined && seatIndex >= 0) {
+          socket.emit("game_state", sanitizeForPlayer(room.state, seatIndex));
+        } else {
+          socket.emit("spectator_state", sanitizeForPlayer(room.state, -1));
         }
       });
 
@@ -177,6 +191,7 @@ class GameManager {
     // Reconnection check
     const existingPlayer = room.state.players.find(p => p.oddsUserId === data.userId && !p.isBot);
     if (existingPlayer) {
+      console.log(`[WS] Player ${data.userId} reconnecting to seat ${existingPlayer.seatIndex} (was disconnected: ${existingPlayer.disconnected})`);
       existingPlayer.disconnected = false;
       room.sockets.set(existingPlayer.seatIndex, socket.id);
       room.userSockets.set(data.userId, socket.id);
@@ -186,6 +201,12 @@ class GameManager {
       (socket as any).__userId = data.userId;
       socket.emit("seat_assigned", { seatIndex: existingPlayer.seatIndex });
       this.broadcastState(data.tableId);
+
+      // If it's this player's turn, restart the action timer
+      if (room.state.actionSeat === existingPlayer.seatIndex && !existingPlayer.folded) {
+        console.log(`[WS] Restarting action timer for reconnected player at seat ${existingPlayer.seatIndex}`);
+        this.startActionTimer(data.tableId);
+      }
       return;
     }
 
@@ -532,15 +553,38 @@ class GameManager {
   private handleDisconnect(socket: Socket) {
     const tableId = (socket as any).__tableId;
     const seatIndex = (socket as any).__seatIndex;
+    const disconnectedSocketId = socket.id;
+
+    console.log(`[WS] Client disconnected: ${disconnectedSocketId} (table: ${tableId}, seat: ${seatIndex})`);
 
     if (tableId !== undefined && seatIndex !== undefined) {
       const room = this.tables.get(tableId);
       if (room) {
+        // Only mark as disconnected if this socket is still the current one for this seat
+        // (prevents marking reconnected player as disconnected when old socket fires disconnect)
+        const currentSocketForSeat = room.sockets.get(seatIndex);
+        if (currentSocketForSeat !== disconnectedSocketId) {
+          console.log(`[WS] Ignoring stale disconnect for seat ${seatIndex} (current socket: ${currentSocketForSeat}, disconnected: ${disconnectedSocketId})`);
+          return;
+        }
+
         const player = room.state.players.find(p => p.seatIndex === seatIndex);
         if (player) {
           player.disconnected = true;
+          // Auto-fold if it's their turn and they disconnect
+          if (room.state.actionSeat === seatIndex && !player.folded && !player.isBot) {
+            console.log(`[Timer] Auto-fold disconnected player at seat ${seatIndex}`);
+            room.state = processAction(room.state, seatIndex, "fold");
+            if (room.state.phase === "showdown") {
+              this.handleShowdown(tableId);
+            } else {
+              this.scheduleNextAction(tableId);
+            }
+          }
           setTimeout(() => {
-            if (player.disconnected) {
+            // Check again that the player is still disconnected AND the socket hasn't been replaced
+            if (player.disconnected && room.sockets.get(seatIndex) === disconnectedSocketId) {
+              console.log(`[WS] Removing disconnected player from seat ${seatIndex} after timeout`);
               if (player.oddsUserId) {
                 this.cashOutPlayer(player.oddsUserId, player.chipStack, tableId);
               }

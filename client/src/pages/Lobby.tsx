@@ -102,7 +102,7 @@ export default function Lobby() {
               <span className="text-sm font-semibold text-gold font-mono-poker">{balance.balanceReal.toLocaleString()}</span>
             </button>
           ) : (
-            <button onClick={() => window.location.href = getLoginUrl()} className="btn-primary-poker px-4 py-2 rounded-lg text-xs font-bold tracking-wider">
+            <button onClick={() => window.location.href = '/login'} className="btn-primary-poker px-4 py-2 rounded-lg text-xs font-bold tracking-wider">
               Sign In
             </button>
           )}
@@ -136,7 +136,7 @@ export default function Lobby() {
             </div>
             <motion.button
               onClick={() => {
-                if (!isAuthenticated) { window.location.href = getLoginUrl(); return; }
+                if (!isAuthenticated) { window.location.href = '/login'; return; }
                 const first = filteredTables[0];
                 if (first) navigate(`/game/${first.id}`);
               }}
@@ -209,7 +209,7 @@ export default function Lobby() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
                     onClick={() => {
-                      if (!isAuthenticated) { window.location.href = getLoginUrl(); return; }
+                      if (!isAuthenticated) { window.location.href = '/login'; return; }
                       navigate(`/game/${table.id}`);
                     }}
                     className="rounded-xl p-3 cursor-pointer transition-all duration-200 active:scale-[0.98] group"
