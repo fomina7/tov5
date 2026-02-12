@@ -318,4 +318,26 @@
   .animate-pulse-gold {
     animation: pulse-gold 2s ease-in-out infinite;
   }
+
+  /* Range slider custom styling */
+  input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #F5E6A3, #D4AF37, #B8941F);
+    border: 2px solid rgba(255,255,255,0.2);
+    box-shadow: 0 0 8px rgba(212, 175, 55, 0.4), 0 2px 4px rgba(0,0,0,0.3);
+    cursor: pointer;
+  }
+  input[type='range']::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #F5E6A3, #D4AF37, #B8941F);
+    border: 2px solid rgba(255,255,255,0.2);
+    box-shadow: 0 0 8px rgba(212, 175, 55, 0.4), 0 2px 4px rgba(0,0,0,0.3);
+    cursor: pointer;
+  }
 }

@@ -1,32 +1,35 @@
 /**
- * GameTable — HOUSE POKER Premium Club
- * Ultra-premium poker table with dark/gold aesthetic.
- * Mobile-first responsive design.
+ * GameTable — Premium Poker Table (TON Poker Style)
+ * All graphics drawn programmatically (SVG/CSS) - no AI images
+ * Mobile-first responsive design with atmospheric effects
  */
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useParams } from 'wouter';
-import { ArrowLeft, Clock, Users, Wifi, WifiOff } from 'lucide-react';
+import { ArrowLeft, Clock, Users, Wifi, WifiOff, MessageCircle, Settings, Volume2, VolumeX } from 'lucide-react';
 import { useSocket, ServerPlayer } from '@/hooks/useSocket';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
-import { ASSETS, SUIT_SYMBOLS, CHIP_VALUES } from '@/lib/assets';
+import { ASSETS } from '@/lib/assets';
 import type { Card } from '@/lib/assets';
 import { toast } from 'sonner';
+import PokerCard from '@/components/PokerCard';
+import PokerChip, { ChipStack, formatChipAmount } from '@/components/PokerChip';
+import TableBackground from '@/components/TableBackground';
 
-/* ─── Seat positions (percentage-based, mobile-optimized) ─── */
+/* ─── Seat positions (percentage-based, mobile-optimized for vertical oval) ─── */
 const SEATS_6 = [
   { x: 50, y: 88 },   // 0: hero (bottom center)
-  { x: 8,  y: 62 },   // 1: left-bottom
+  { x: 8,  y: 66 },   // 1: left-bottom
   { x: 8,  y: 28 },   // 2: left-top
   { x: 50, y: 4 },    // 3: top center
   { x: 92, y: 28 },   // 4: right-top
-  { x: 92, y: 62 },   // 5: right-bottom
+  { x: 92, y: 66 },   // 5: right-bottom
 ];
 const SEATS_9 = [
-  { x: 50, y: 88 }, { x: 10, y: 74 }, { x: 6, y: 46 },
+  { x: 50, y: 88 }, { x: 10, y: 74 }, { x: 6, y: 48 },
   { x: 10, y: 18 }, { x: 34, y: 4 },  { x: 66, y: 4 },
-  { x: 90, y: 18 }, { x: 94, y: 46 }, { x: 90, y: 74 },
+  { x: 90, y: 18 }, { x: 94, y: 48 }, { x: 90, y: 74 },
 ];
 const SEATS_2 = [{ x: 50, y: 88 }, { x: 50, y: 4 }];
 
@@ -34,104 +37,53 @@ function getSeats(n: number) {
   return n <= 2 ? SEATS_2 : n <= 6 ? SEATS_6 : SEATS_9;
 }
 
+/* ─── Bet pill positions (offset from player toward center) ─── */
+function getBetPos(playerPos: { x: number; y: number }) {
+  const cx = 50, cy = 46;
+  const dx = cx - playerPos.x;
+  const dy = cy - playerPos.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const factor = Math.min(0.45, 18 / dist);
+  return {
+    x: playerPos.x + dx * factor,
+    y: playerPos.y + dy * factor,
+  };
+}
+
 const PHASE_LABELS: Record<string, string> = {
   waiting: 'WAITING', preflop: 'PRE-FLOP', flop: 'FLOP',
   turn: 'TURN', river: 'RIVER', showdown: 'SHOWDOWN',
 };
 
-/* ─── Chip Stack Visual ─── */
-function ChipStack({ amount }: { amount: number }) {
-  if (amount <= 0) return null;
-  const chips: typeof CHIP_VALUES[number][] = [];
-  let remaining = amount;
-  for (let i = CHIP_VALUES.length - 1; i >= 0; i--) {
-    const cv = CHIP_VALUES[i];
-    while (remaining >= cv.value && chips.length < 5) {
-      chips.push(cv);
-      remaining -= cv.value;
-    }
-  }
-  if (chips.length === 0) chips.push(CHIP_VALUES[0]);
-
+/* ─── Dealer Button (SVG) ─── */
+function DealerButton({ size = 18 }: { size?: number }) {
   return (
-    <div className="flex items-center gap-0.5">
-      <div className="relative" style={{ width: 14, height: 14 + chips.length * 2 }}>
-        {chips.slice(0, 4).map((c, i) => (
-          <img key={i} src={c.img} alt="" className="absolute w-3.5 h-3.5 rounded-full"
-            style={{ bottom: i * 2, left: 0, filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))' }} />
-        ))}
-      </div>
-      <span className="text-[9px] font-bold text-gold ml-0.5 font-mono-poker">
-        {amount >= 1000 ? `${(amount / 1000).toFixed(1)}k` : amount.toLocaleString()}
-      </span>
-    </div>
+    <svg width={size} height={size} viewBox="0 0 18 18">
+      <circle cx="9" cy="9" r="8" fill="url(#dealerGrad)" stroke="rgba(0,0,0,0.3)" strokeWidth="0.5" />
+      <defs>
+        <linearGradient id="dealerGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#F5E6A3" />
+          <stop offset="50%" stopColor="#D4AF37" />
+          <stop offset="100%" stopColor="#B8941F" />
+        </linearGradient>
+      </defs>
+      <text x="9" y="12.5" textAnchor="middle" fontSize="9" fontWeight="900" fill="#1a1a0a" fontFamily="Inter, sans-serif">D</text>
+    </svg>
   );
 }
 
-/* ─── Playing Card ─── */
-function CardView({ card, faceDown = false, size = 'md' }: {
-  card: Card; faceDown?: boolean; size?: 'sm' | 'md' | 'lg' | 'xl';
-}) {
-  const dims = {
-    sm: { w: 26, h: 38 },
-    md: { w: 36, h: 52 },
-    lg: { w: 48, h: 68 },
-    xl: { w: 58, h: 84 },
-  };
-  const { w, h } = dims[size];
-  const fs = {
-    sm: { rank: 9, suit: 7, center: 11 },
-    md: { rank: 11, suit: 9, center: 15 },
-    lg: { rank: 14, suit: 11, center: 20 },
-    xl: { rank: 16, suit: 13, center: 24 },
-  };
-
-  if (faceDown) {
-    return (
-      <div className="rounded-md overflow-hidden flex-shrink-0" style={{
-        width: w, height: h,
-        background: `url(${ASSETS.cardBack}) center/cover`,
-        border: '1px solid rgba(212, 175, 55, 0.15)',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.6)',
-      }} />
-    );
-  }
-
-  const suitStr = String(card.suit);
-  const isRed = suitStr === 'hearts' || suitStr === 'diamonds' || suitStr === 'h' || suitStr === 'd';
-  const color = isRed ? '#e53e3e' : '#1a1a2e';
-  const symbol = SUIT_SYMBOLS[card.suit] || '?';
-  const rankStr = String(card.rank);
-  const rank = rankStr === 'T' ? '10' : rankStr;
-
+/* ─── Position Badge ─── */
+function PositionBadge({ label, color }: { label: string; color: string }) {
   return (
-    <motion.div
-      initial={{ rotateY: 180, opacity: 0 }}
-      animate={{ rotateY: 0, opacity: 1 }}
-      transition={{ duration: 0.3, type: 'spring', stiffness: 200 }}
-      className="rounded-md flex-shrink-0 relative overflow-hidden"
+    <div className="absolute -top-0.5 -right-0.5 z-10 w-4 h-4 rounded-full flex items-center justify-center text-[6px] font-black"
       style={{
-        width: w, height: h,
-        background: 'linear-gradient(160deg, #ffffff 0%, #f9f9f9 40%, #f0f0f0 100%)',
-        border: '1px solid rgba(0,0,0,0.1)',
-        boxShadow: '0 3px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.95)',
-      }}
-    >
-      {/* Top-left rank + suit */}
-      <div className="absolute flex flex-col items-center leading-none" style={{ top: 2, left: 3 }}>
-        <span className="font-black" style={{ fontSize: fs[size].rank, color, lineHeight: 1 }}>{rank}</span>
-        <span style={{ fontSize: fs[size].suit, color, lineHeight: 1 }}>{symbol}</span>
-      </div>
-      {/* Center suit */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <span style={{ fontSize: fs[size].center, color, opacity: 0.8 }}>{symbol}</span>
-      </div>
-      {/* Bottom-right rank + suit (inverted) */}
-      <div className="absolute flex flex-col items-center leading-none rotate-180" style={{ bottom: 2, right: 3 }}>
-        <span className="font-black" style={{ fontSize: fs[size].rank, color, lineHeight: 1 }}>{rank}</span>
-        <span style={{ fontSize: fs[size].suit, color, lineHeight: 1 }}>{symbol}</span>
-      </div>
-    </motion.div>
+        background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+        color: '#fff',
+        boxShadow: `0 1px 4px rgba(0,0,0,0.4), 0 0 6px ${color}40`,
+        border: '1px solid rgba(255,255,255,0.15)',
+      }}>
+      {label}
+    </div>
   );
 }
 
@@ -144,7 +96,9 @@ function SeatView({
   isHero: boolean; isShowdown: boolean; isWinner: boolean; timerPct: number;
 }) {
   const avatarUrl = ASSETS.avatars[player.avatar as keyof typeof ASSETS.avatars] || ASSETS.avatars.fox;
-  const isTop = pos.y < 35;
+  const isTop = pos.y < 30;
+  const isLeft = pos.x < 30;
+  const isRight = pos.x > 70;
 
   return (
     <motion.div
@@ -158,25 +112,25 @@ function SeatView({
       animate={{ scale: 1, opacity: 1 }}
       transition={{ type: 'spring', stiffness: 200 }}
     >
-      {/* Hole cards — show above for top players, skip for hero */}
+      {/* Hole cards — show above for top players */}
       {!isHero && isTop && player.holeCards.length > 0 && !player.folded && (
-        <div className="flex gap-0.5 mb-0.5">
+        <div className="flex gap-0.5 mb-1">
           {player.holeCards.map((c, i) => (
-            <CardView key={i} card={c as Card} faceDown={!isShowdown} size="sm" />
+            <PokerCard key={i} card={c as Card} faceDown={!isShowdown} size="xs" delay={i * 0.05} />
           ))}
         </div>
       )}
 
       {/* Player container */}
-      <div className={`relative ${player.folded ? 'opacity-25 grayscale' : ''} transition-all duration-300`}>
+      <div className={`relative ${player.folded ? 'opacity-30 grayscale' : ''} transition-all duration-300`}>
         {/* Timer ring */}
         {isAction && !player.folded && (
-          <svg className="absolute" viewBox="0 0 52 52" style={{ width: '130%', height: '130%', left: '-15%', top: '-15%' }}>
-            <circle cx="26" cy="26" r="24" fill="none" stroke="rgba(212,175,55,0.08)" strokeWidth="2" />
-            <circle cx="26" cy="26" r="24" fill="none"
+          <svg className="absolute" viewBox="0 0 52 52" style={{ width: '140%', height: '140%', left: '-20%', top: '-20%' }}>
+            <circle cx="26" cy="26" r="23" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="2" />
+            <circle cx="26" cy="26" r="23" fill="none"
               stroke={timerPct > 0.5 ? '#D4AF37' : timerPct > 0.25 ? '#f59e0b' : '#ef4444'}
               strokeWidth="2.5"
-              strokeDasharray={`${timerPct * 150.8} 150.8`}
+              strokeDasharray={`${timerPct * 144.5} 144.5`}
               strokeLinecap="round"
               transform="rotate(-90 26 26)"
               style={{ transition: 'stroke-dasharray 0.5s linear, stroke 0.5s' }}
@@ -189,21 +143,21 @@ function SeatView({
           <motion.div
             className="absolute -inset-3 rounded-full"
             style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.5) 0%, transparent 70%)' }}
-            animate={{ scale: [1, 1.4, 1], opacity: [0.4, 1, 0.4] }}
+            animate={{ scale: [1, 1.5, 1], opacity: [0.3, 0.8, 0.3] }}
             transition={{ duration: 1.5, repeat: Infinity }}
           />
         )}
 
         {/* Avatar */}
-        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full overflow-hidden" style={{
+        <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full overflow-hidden" style={{
           border: `2px solid ${
             isWinner ? '#D4AF37'
             : isAction ? 'rgba(212,175,55,0.8)'
             : isHero ? 'rgba(212,175,55,0.4)'
-            : 'rgba(255,255,255,0.08)'
+            : 'rgba(255,255,255,0.1)'
           }`,
           boxShadow: isWinner
-            ? '0 0 20px rgba(212,175,55,0.6)'
+            ? '0 0 20px rgba(212,175,55,0.6), 0 0 40px rgba(212,175,55,0.2)'
             : isAction
             ? '0 0 12px rgba(212,175,55,0.3)'
             : '0 2px 8px rgba(0,0,0,0.5)',
@@ -211,57 +165,48 @@ function SeatView({
           <img src={avatarUrl} alt={player.name} className="w-full h-full object-cover" />
         </div>
 
-        {/* Position badges */}
+        {/* Dealer button */}
         {isDealer && (
-          <div className="absolute -top-0.5 -right-0.5 z-10 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[5px] font-black"
-            style={{ background: 'linear-gradient(135deg, #D4AF37, #B8941F)', color: '#000', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>D</div>
+          <div className="absolute -bottom-1 -left-1 z-10">
+            <DealerButton size={16} />
+          </div>
         )}
-        {isSB && !isDealer && (
-          <div className="absolute -top-0.5 -right-0.5 z-10 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[5px] font-black"
-            style={{ background: '#3b82f6', color: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>S</div>
-        )}
-        {isBB && !isDealer && !isSB && (
-          <div className="absolute -top-0.5 -right-0.5 z-10 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[5px] font-black"
-            style={{ background: '#ef4444', color: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>B</div>
-        )}
+
+        {/* SB/BB badges */}
+        {isSB && !isDealer && <PositionBadge label="S" color="#3b82f6" />}
+        {isBB && !isDealer && !isSB && <PositionBadge label="B" color="#ef4444" />}
       </div>
 
       {/* Name + stack plate */}
-      <div className="mt-0.5 text-center px-1.5 py-0.5 rounded-md" style={{
+      <div className="mt-0.5 text-center px-2 py-0.5 rounded-lg" style={{
         background: isHero
-          ? 'linear-gradient(135deg, rgba(212,175,55,0.12), rgba(212,175,55,0.04))'
-          : 'rgba(0,0,0,0.75)',
-        backdropFilter: 'blur(8px)',
+          ? 'linear-gradient(135deg, rgba(212,175,55,0.15), rgba(212,175,55,0.05))'
+          : 'rgba(0,0,0,0.8)',
+        backdropFilter: 'blur(12px)',
         border: isHero
-          ? '1px solid rgba(212,175,55,0.15)'
-          : '1px solid rgba(255,255,255,0.03)',
-        minWidth: 44,
+          ? '1px solid rgba(212,175,55,0.2)'
+          : '1px solid rgba(255,255,255,0.04)',
+        minWidth: 48,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
       }}>
-        <div className={`text-[7px] sm:text-[8px] font-semibold truncate max-w-[50px] sm:max-w-[60px] ${isHero ? 'text-gold-light' : 'text-gray-300'}`}>
-          {isHero ? 'YOU' : player.name}
+        <div className={`text-[7px] sm:text-[8px] font-semibold truncate max-w-[52px] sm:max-w-[64px] ${isHero ? 'text-gold-light' : 'text-gray-300'}`}>
+          {isHero ? '★ YOU' : player.name}
         </div>
-        <div className="text-[7px] sm:text-[8px] font-bold text-gold font-mono-poker">
-          {player.chipStack >= 1000 ? `${(player.chipStack / 1000).toFixed(1)}k` : player.chipStack.toLocaleString()}
+        <div className="text-[8px] sm:text-[9px] font-bold text-gold font-mono-poker">
+          {formatChipAmount(player.chipStack)}
         </div>
       </div>
-
-      {/* Current bet */}
-      {player.currentBet > 0 && (
-        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="mt-0.5">
-          <ChipStack amount={player.currentBet} />
-        </motion.div>
-      )}
 
       {/* Last action badge */}
       {player.lastAction && (
         <motion.div
           initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }}
-          className="mt-0.5 px-1.5 py-0.5 rounded-full text-[6px] sm:text-[7px] font-black uppercase tracking-wider"
+          className="mt-0.5 px-2 py-0.5 rounded-full text-[6px] sm:text-[7px] font-black uppercase tracking-wider"
           style={{
             background: player.lastAction.startsWith('WIN')
               ? 'linear-gradient(135deg, rgba(212,175,55,0.3), rgba(212,175,55,0.1))'
               : player.lastAction === 'FOLD'
-              ? 'rgba(255,0,0,0.15)'
+              ? 'rgba(239,68,68,0.15)'
               : player.lastAction === 'ALL IN'
               ? 'linear-gradient(135deg, rgba(255,107,0,0.3), rgba(255,107,0,0.1))'
               : 'rgba(255,255,255,0.06)',
@@ -287,10 +232,63 @@ function SeatView({
       {!isHero && !isTop && player.holeCards.length > 0 && !player.folded && (
         <div className="flex gap-0.5 mt-0.5">
           {player.holeCards.map((c, i) => (
-            <CardView key={i} card={c as Card} faceDown={!isShowdown} size="sm" />
+            <PokerCard key={i} card={c as Card} faceDown={!isShowdown} size="xs" delay={i * 0.05} />
           ))}
         </div>
       )}
+    </motion.div>
+  );
+}
+
+/* ─── Bet Pill (gold pill near player) ─── */
+function BetPill({ amount, pos }: { amount: number; pos: { x: number; y: number } }) {
+  if (amount <= 0) return null;
+  return (
+    <motion.div
+      initial={{ scale: 0, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      className="absolute z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-full"
+      style={{
+        left: `${pos.x}%`,
+        top: `${pos.y}%`,
+        transform: 'translate(-50%, -50%)',
+        background: 'linear-gradient(135deg, rgba(212,175,55,0.2), rgba(212,175,55,0.08))',
+        border: '1px solid rgba(212,175,55,0.25)',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+        backdropFilter: 'blur(8px)',
+      }}
+    >
+      <PokerChip size={10} amount={amount} />
+      <span className="text-[8px] font-bold text-gold font-mono-poker">{formatChipAmount(amount)}</span>
+    </motion.div>
+  );
+}
+
+/* ─── Empty Seat ─── */
+function EmptySeat({ pos, seatIndex, onSit }: { pos: { x: number; y: number }; seatIndex: number; onSit: () => void }) {
+  return (
+    <motion.div
+      className="absolute flex flex-col items-center"
+      style={{
+        left: `${pos.x}%`, top: `${pos.y}%`,
+        transform: 'translate(-50%, -50%)',
+        zIndex: 5,
+      }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+    >
+      <button
+        onClick={onSit}
+        className="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95"
+        style={{
+          background: 'rgba(255,255,255,0.03)',
+          border: '1.5px dashed rgba(255,255,255,0.1)',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+        }}
+      >
+        <span className="text-[8px] sm:text-[9px] font-bold text-gray-500">SIT</span>
+      </button>
+      <div className="mt-0.5 text-[6px] text-gray-600 font-mono-poker">#{seatIndex + 1}</div>
     </motion.div>
   );
 }
@@ -309,8 +307,23 @@ export default function GameTable() {
   const [raiseAmount, setRaiseAmount] = useState(0);
   const [showRaise, setShowRaise] = useState(false);
   const [preAction, setPreAction] = useState<string | null>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [tableSize_, setTableSize_] = useState({ w: 400, h: 500 });
 
   const { data: tableConfig } = trpc.tables.get.useQuery({ id: tableId });
+
+  // Measure table container
+  useEffect(() => {
+    const measure = () => {
+      if (tableRef.current) {
+        const rect = tableRef.current.getBoundingClientRect();
+        setTableSize_({ w: rect.width, h: rect.height });
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
 
   // Join table
   useEffect(() => {
@@ -422,135 +435,180 @@ export default function GameTable() {
     const pot = totalPot;
     const minR = Math.max(gameState.currentBet + minRaise, bb);
     return [
-      { label: '2BB', value: Math.min(bb * 2 + gameState.currentBet, maxRaise) },
+      { label: 'Min', value: Math.max(minR, gameState.currentBet + bb) },
       { label: '3BB', value: Math.min(bb * 3 + gameState.currentBet, maxRaise) },
+      { label: '5BB', value: Math.min(bb * 5 + gameState.currentBet, maxRaise) },
       { label: '½ Pot', value: Math.min(Math.floor(pot / 2) + gameState.currentBet, maxRaise) },
       { label: 'Pot', value: Math.min(pot + gameState.currentBet, maxRaise) },
+      { label: 'All In', value: maxRaise },
     ].filter(p => p.value >= minR && p.value <= maxRaise);
   }, [gameState, heroPlayer, totalPot, minRaise, maxRaise]);
+
+  // Occupied seat indices
+  const occupiedSeats = useMemo(() => {
+    if (!gameState) return new Set<number>();
+    return new Set(gameState.players.map(p => p.seatIndex));
+  }, [gameState?.players]);
 
   /* ─── Loading State ─── */
   if (!connected || !gameState) {
     return (
-      <div className="h-[100dvh] flex flex-col items-center justify-center gap-4 noise-overlay" style={{
-        background: 'radial-gradient(ellipse at center, rgba(10,8,4,1) 0%, rgba(4,4,6,1) 100%)',
-      }}>
-        <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}>
-          <img src={ASSETS.ui.crown} alt="" className="w-12 h-12" style={{ filter: 'drop-shadow(0 4px 12px rgba(212,175,55,0.3))' }} />
-        </motion.div>
-        <p className="text-gray-400 text-sm font-medium">{!connected ? 'Connecting...' : 'Joining table...'}</p>
-        {!user && <p className="text-gold/60 text-xs">Please sign in to play</p>}
-        <button onClick={() => navigate('/lobby')} className="text-gray-600 text-xs underline mt-4 hover:text-gray-400 transition-colors">
-          Back to Lobby
-        </button>
+      <div className="h-[100dvh] flex flex-col items-center justify-center gap-4 relative overflow-hidden">
+        <TableBackground />
+        <div className="relative z-10 flex flex-col items-center gap-4">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+          >
+            <svg width="48" height="48" viewBox="0 0 48 48">
+              <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(212,175,55,0.2)" strokeWidth="2" />
+              <circle cx="24" cy="24" r="20" fill="none" stroke="#D4AF37" strokeWidth="2"
+                strokeDasharray="40 86" strokeLinecap="round" />
+            </svg>
+          </motion.div>
+          <p className="text-gray-400 text-sm font-medium">{!connected ? 'Connecting...' : 'Joining table...'}</p>
+          {!user && <p className="text-gold/60 text-xs">Please sign in to play</p>}
+          <button onClick={() => navigate('/lobby')} className="text-gray-600 text-xs underline mt-4 hover:text-gray-400 transition-colors">
+            Back to Lobby
+          </button>
+        </div>
       </div>
     );
   }
 
   /* ─── Main Render ─── */
   return (
-    <div className="h-[100dvh] flex flex-col relative overflow-hidden select-none noise-overlay" style={{
-      background: `url(${ASSETS.gameBg}) center/cover no-repeat`,
-      backgroundColor: '#050507',
-    }}>
-      {/* Dark overlay */}
-      <div className="absolute inset-0" style={{ background: 'rgba(4,4,6,0.6)' }} />
+    <div className="h-[100dvh] flex flex-col relative overflow-hidden select-none">
+      {/* Atmospheric background */}
+      <TableBackground />
 
       {/* ─── Top HUD ─── */}
       <div className="relative z-30 flex items-center justify-between px-2 py-1.5 shrink-0" style={{
-        background: 'linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.2) 80%, transparent 100%)',
+        background: 'linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.2) 80%, transparent 100%)',
       }}>
         <button onClick={() => { leaveTable(tableId); navigate('/lobby'); }}
-          className="w-7 h-7 rounded-full flex items-center justify-center glass-card active:scale-90 transition-transform">
-          <ArrowLeft size={12} className="text-gray-400" />
+          className="w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90"
+          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <ArrowLeft size={14} className="text-gray-400" />
         </button>
 
         <div className="flex items-center gap-1.5">
-          <div className="glass-card px-2.5 py-1 rounded-lg text-center">
-            <div className="text-[7px] uppercase tracking-[0.15em] text-gray-500 font-semibold">
-              {PHASE_LABELS[gameState.phase]} #{gameState.handNumber}
+          {/* Game info label */}
+          <div className="px-3 py-1 rounded-lg text-center" style={{
+            background: 'rgba(0,0,0,0.5)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            backdropFilter: 'blur(12px)',
+          }}>
+            <div className="text-[8px] uppercase tracking-[0.12em] text-gray-500 font-semibold">
+              NLH ~ {gameState.smallBlind}/{gameState.bigBlind} {tableSize}MAX
             </div>
-            <div className="text-[10px] font-bold text-gold font-mono-poker">
-              {gameState.smallBlind}/{gameState.bigBlind}
+            <div className="text-[9px] font-bold text-gray-400 font-mono-poker">
+              {PHASE_LABELS[gameState.phase]} #{gameState.handNumber}
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Timer */}
           {gameState.phase !== 'showdown' && gameState.phase !== 'waiting' && (
-            <div className={`glass-card px-1.5 py-1 rounded-lg flex items-center gap-0.5 ${turnTimer <= 10 ? 'border border-red-500/20' : ''}`}>
-              <Clock size={9} className={turnTimer <= 10 ? 'text-red-400' : 'text-gray-500'} />
-              <span className={`text-[9px] font-bold font-mono-poker ${turnTimer <= 10 ? 'text-red-400 animate-pulse' : 'text-gray-400'}`}>
+            <div className={`px-2 py-1 rounded-lg flex items-center gap-1 ${turnTimer <= 10 ? 'border border-red-500/20' : ''}`}
+              style={{ background: 'rgba(0,0,0,0.5)', border: turnTimer <= 10 ? undefined : '1px solid rgba(255,255,255,0.06)' }}>
+              <Clock size={10} className={turnTimer <= 10 ? 'text-red-400' : 'text-gray-500'} />
+              <span className={`text-[10px] font-bold font-mono-poker ${turnTimer <= 10 ? 'text-red-400 animate-pulse' : 'text-gray-400'}`}>
                 {turnTimer}s
               </span>
             </div>
           )}
-          <div className="glass-card px-1.5 py-1 rounded-lg flex items-center gap-0.5">
-            {connected ? <Wifi size={8} className="text-emerald-400" /> : <WifiOff size={8} className="text-red-400" />}
-            <Users size={8} className="text-gray-500" />
-            <span className="text-[8px] text-gray-500">{gameState.players.length}</span>
+          {/* Connection + players */}
+          <div className="px-2 py-1 rounded-lg flex items-center gap-1" style={{
+            background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.06)',
+          }}>
+            {connected ? <Wifi size={9} className="text-emerald-400" /> : <WifiOff size={9} className="text-red-400" />}
+            <Users size={9} className="text-gray-500" />
+            <span className="text-[9px] text-gray-500 font-mono-poker">{gameState.players.length}/{tableSize}</span>
           </div>
         </div>
       </div>
 
       {/* ─── Table Area ─── */}
-      <div className="flex-1 relative z-10" style={{ minHeight: 0 }}>
+      <div className="flex-1 relative z-10" style={{ minHeight: 0 }} ref={tableRef}>
         <div className="absolute inset-0 flex items-center justify-center p-2 sm:p-4">
-          <div className="relative w-full" style={{ maxWidth: 720, aspectRatio: '16/10' }}>
+          <div className="relative w-full h-full" style={{ maxWidth: 720, maxHeight: '100%' }}>
 
-            {/* Poker table — outer rim */}
-            <div className="absolute inset-[3%] sm:inset-[5%]" style={{
-              borderRadius: '50%/50%',
-              background: 'linear-gradient(180deg, rgba(20,18,12,0.98) 0%, rgba(10,10,16,0.99) 100%)',
-              boxShadow: `
-                0 0 0 2px rgba(212,175,55,0.04),
-                0 0 0 5px rgba(6,6,10,0.95),
-                0 0 60px rgba(0,0,0,0.8),
-                inset 0 0 40px rgba(0,0,0,0.3)
-              `,
-              border: '1px solid rgba(212,175,55,0.04)',
-            }}>
-              {/* Green felt */}
-              <div className="absolute" style={{
-                left: '4%', right: '4%', top: '6%', bottom: '6%',
+            {/* Poker table — SVG drawn */}
+            <div className="absolute inset-[6%] sm:inset-[8%]">
+              {/* Table outer rim */}
+              <div className="absolute inset-0" style={{
                 borderRadius: '50%',
-                background: 'radial-gradient(ellipse at 50% 40%, #1a7035 0%, #14602c 20%, #0d4d22 45%, #083a17 70%, #042810 100%)',
-                boxShadow: 'inset 0 0 60px rgba(0,0,0,0.5), inset 0 -10px 30px rgba(0,0,0,0.2)',
-                border: '1px solid rgba(212,175,55,0.02)',
+                background: 'linear-gradient(180deg, #1e1a14 0%, #141210 50%, #0a0908 100%)',
+                boxShadow: `
+                  0 0 0 1px rgba(212,175,55,0.06),
+                  0 0 60px rgba(0,0,0,0.8),
+                  0 8px 32px rgba(0,0,0,0.6)
+                `,
               }}>
-                {/* Felt texture overlay */}
-                <div className="absolute inset-0 rounded-[50%] opacity-[0.02]" style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg width='6' height='6' viewBox='0 0 6 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 5h1v1H1V5zm2-2h1v1H3V3zm2-2h1v1H5V1z' fill='%23ffffff' fill-opacity='0.3'/%3E%3C/svg%3E")`,
+                {/* Gold border accent */}
+                <div className="absolute inset-[2px]" style={{
+                  borderRadius: '50%',
+                  border: '1px solid rgba(212,175,55,0.1)',
                 }} />
+
+                {/* Green felt */}
+                <div className="absolute" style={{
+                  left: '5%', right: '5%', top: '5%', bottom: '5%',
+                  borderRadius: '50%',
+                  background: 'radial-gradient(ellipse at 50% 40%, #1e8a42 0%, #1a7a3a 15%, #146830 35%, #0e5424 60%, #083a17 85%, #052810 100%)',
+                  boxShadow: 'inset 0 0 50px rgba(0,0,0,0.4), inset 0 -8px 24px rgba(0,0,0,0.2)',
+                }}>
+                  {/* Felt texture */}
+                  <div className="absolute inset-0 rounded-[50%] opacity-[0.03]" style={{
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg width='6' height='6' viewBox='0 0 6 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 5h1v1H1V5zm2-2h1v1H3V3zm2-2h1v1H5V1z' fill='%23ffffff' fill-opacity='0.3'/%3E%3C/svg%3E")`,
+                  }} />
+                  {/* Ambient light spot */}
+                  <div className="absolute inset-0 rounded-[50%]" style={{
+                    background: 'radial-gradient(ellipse at 50% 35%, rgba(255,255,255,0.04) 0%, transparent 60%)',
+                  }} />
+                  {/* Glowing inner border */}
+                  <div className="absolute inset-0 rounded-[50%]" style={{
+                    border: '1px solid rgba(180,200,160,0.06)',
+                    boxShadow: 'inset 0 0 20px rgba(100,200,120,0.02)',
+                  }} />
+                </div>
               </div>
             </div>
+
+            {/* ─── Hand ID in center ─── */}
+            {gameState.handNumber > 0 && gameState.phase !== 'waiting' && (
+              <div className="absolute left-1/2 -translate-x-1/2 z-5 text-[8px] text-white/10 font-mono-poker"
+                style={{ top: '55%' }}>
+                #{gameState.handNumber}
+              </div>
+            )}
 
             {/* ─── Pot Display ─── */}
             {totalPot > 0 && (
               <motion.div
                 initial={{ scale: 0 }} animate={{ scale: 1 }}
                 className="absolute left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-0.5"
-                style={{
-                  top: '18%',
-                  background: 'rgba(0,0,0,0.85)',
-                  backdropFilter: 'blur(16px)',
-                  borderRadius: 10,
-                  padding: '3px 10px',
-                  border: '1px solid rgba(212,175,55,0.2)',
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-                }}
+                style={{ top: '26%' }}
               >
-                <div className="flex items-center gap-1">
-                  <img src={ASSETS.chips.gold} alt="" className="w-3 h-3" style={{ filter: 'drop-shadow(0 1px 3px rgba(212,175,55,0.4))' }} />
-                  <span className="text-[10px] sm:text-xs font-bold text-gold font-mono-poker">
+                <div className="flex items-center gap-1.5 px-4 py-1.5 rounded-full" style={{
+                  background: 'rgba(0,0,0,0.75)',
+                  backdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(212,175,55,0.25)',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.5), 0 0 12px rgba(212,175,55,0.08)',
+                }}>
+                  <PokerChip size={14} amount={totalPot} />
+                  <span className="text-xs sm:text-sm font-bold text-gold font-mono-poker">
                     {totalPot.toLocaleString()}
                   </span>
                 </div>
                 {/* Side pots */}
                 {hasMultiplePots && (
-                  <div className="flex gap-1">
-                    {gameState!.pots.filter(p => p.amount > 0).map((pot, i) => (
-                      <span key={i} className="text-[7px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 font-mono-poker">
+                  <div className="flex gap-1 mt-0.5">
+                    {gameState.pots.filter(p => p.amount > 0).map((pot, i) => (
+                      <span key={i} className="text-[7px] px-1.5 py-0.5 rounded-full text-gray-400 font-mono-poker"
+                        style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.05)' }}>
                         {i === 0 ? 'Main' : `Side ${i}`}: {pot.amount}
                       </span>
                     ))}
@@ -560,25 +618,34 @@ export default function GameTable() {
             )}
 
             {/* ─── Community Cards ─── */}
-            <div className="absolute left-1/2 flex gap-0.5 sm:gap-1 z-10" style={{ top: '40%', transform: 'translate(-50%, -50%)' }}>
+            <div className="absolute left-1/2 flex gap-1.5 sm:gap-2 z-10" style={{ top: '44%', transform: 'translate(-50%, -50%)' }}>
               <AnimatePresence>
                 {gameState.communityCards.map((card, i) => (
-                  <motion.div key={`cc-${i}`} initial={{ y: -12, opacity: 0, scale: 0.8 }} animate={{ y: 0, opacity: 1, scale: 1 }} transition={{ delay: i * 0.08 }}>
-                    <CardView card={card as Card} size="sm" />
+                  <motion.div key={`cc-${i}`} initial={{ y: -15, opacity: 0, scale: 0.7 }} animate={{ y: 0, opacity: 1, scale: 1 }} transition={{ delay: i * 0.1, type: 'spring', stiffness: 200 }}>
+                    <PokerCard card={card as Card} size="md" delay={i * 0.08} />
                   </motion.div>
                 ))}
               </AnimatePresence>
-              {/* Empty slots */}
+              {/* Empty card slots */}
               {gameState.communityCards.length < 5 && gameState.phase !== 'waiting' && (
                 Array.from({ length: 5 - gameState.communityCards.length }).map((_, i) => (
-                  <div key={`e-${i}`} className="rounded-md" style={{
-                    width: 26, height: 38,
-                    background: 'rgba(255,255,255,0.01)',
-                    border: '1px dashed rgba(255,255,255,0.03)',
+                  <div key={`e-${i}`} className="rounded" style={{
+                    width: 44, height: 63,
+                    background: 'rgba(255,255,255,0.015)',
+                    border: '1px dashed rgba(255,255,255,0.04)',
+                    borderRadius: 5,
                   }} />
                 ))
               )}
             </div>
+
+            {/* ─── Bet Pills ─── */}
+            {orderedPlayers.map(player => {
+              if (player.currentBet <= 0) return null;
+              const pos = seats[player.vi] || seats[0];
+              const betPos = getBetPos(pos);
+              return <BetPill key={`bet-${player.seatIndex}`} amount={player.currentBet} pos={betPos} />;
+            })}
 
             {/* ─── Player Seats ─── */}
             {orderedPlayers.map(player => {
@@ -599,24 +666,40 @@ export default function GameTable() {
                 />
               );
             })}
+
+            {/* ─── Empty Seats ─── */}
+            {Array.from({ length: tableSize }).map((_, i) => {
+              const vi = heroSeat >= 0 ? (i - heroSeat + tableSize) % tableSize : i;
+              if (occupiedSeats.has(i)) return null;
+              if (vi === 0 && heroSeat >= 0) return null; // Hero's seat
+              const pos = seats[vi] || seats[0];
+              return (
+                <EmptySeat
+                  key={`empty-${i}`}
+                  pos={pos}
+                  seatIndex={i}
+                  onSit={() => toast.info('Seat selection coming soon')}
+                />
+              );
+            })}
           </div>
         </div>
       </div>
 
       {/* ─── Hero Cards ─── */}
       <div className="shrink-0 relative z-20" style={{
-        background: 'linear-gradient(0deg, rgba(4,4,6,0.85) 0%, rgba(4,4,6,0.4) 60%, transparent 100%)',
-        minHeight: 36,
+        background: 'linear-gradient(0deg, rgba(4,4,6,0.9) 0%, rgba(4,4,6,0.4) 60%, transparent 100%)',
+        minHeight: 40,
       }}>
         {heroPlayer && !heroPlayer.folded && heroPlayer.holeCards && heroPlayer.holeCards.length > 0 ? (
-          <div className="flex justify-center gap-1.5 sm:gap-2 py-1">
+          <div className="flex justify-center gap-2 sm:gap-3 py-1">
             {heroPlayer.holeCards.map((card, i) => (
               <motion.div
                 key={`hero-${i}-${card.rank}-${card.suit}`}
-                whileHover={{ y: -4, scale: 1.03 }}
+                whileHover={{ y: -6, scale: 1.05 }}
                 transition={{ type: 'spring', stiffness: 300 }}
               >
-                <CardView card={card as Card} size="lg" />
+                <PokerCard card={card as Card} size="md" delay={i * 0.1} />
               </motion.div>
             ))}
           </div>
@@ -643,10 +726,31 @@ export default function GameTable() {
               initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ type: 'spring', stiffness: 200, delay: 0.3 }}
-              className="glass-card rounded-2xl p-5 mx-4 text-center max-w-xs"
-              style={{ border: '1px solid rgba(212,175,55,0.2)', boxShadow: '0 0 40px rgba(212,175,55,0.15)' }}
+              className="rounded-2xl p-6 mx-4 text-center max-w-xs"
+              style={{
+                background: 'linear-gradient(145deg, rgba(16,16,28,0.95), rgba(8,8,16,0.98))',
+                border: '1px solid rgba(212,175,55,0.25)',
+                boxShadow: '0 0 60px rgba(212,175,55,0.15), 0 20px 60px rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(24px)',
+              }}
             >
-              <img src={ASSETS.ui.trophy} alt="" className="w-12 h-12 mx-auto mb-2" style={{ filter: 'drop-shadow(0 4px 12px rgba(212,175,55,0.3))' }} />
+              {/* Trophy SVG */}
+              <svg width="48" height="48" viewBox="0 0 48 48" className="mx-auto mb-3">
+                <defs>
+                  <linearGradient id="trophyGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#F5E6A3" />
+                    <stop offset="50%" stopColor="#D4AF37" />
+                    <stop offset="100%" stopColor="#B8941F" />
+                  </linearGradient>
+                </defs>
+                <path d="M14 8h20v4c0 8-4 14-10 16-6-2-10-8-10-16V8z" fill="url(#trophyGrad)" />
+                <path d="M14 12H8c0 6 3 10 6 12" fill="none" stroke="#D4AF37" strokeWidth="2" />
+                <path d="M34 12h6c0 6-3 10-6 12" fill="none" stroke="#D4AF37" strokeWidth="2" />
+                <rect x="18" y="28" width="12" height="4" rx="1" fill="#B8941F" />
+                <rect x="16" y="32" width="16" height="4" rx="2" fill="#D4AF37" />
+                <circle cx="24" cy="18" r="4" fill="rgba(255,255,255,0.2)" />
+              </svg>
+
               {gameState.players.filter(p => p.lastAction?.startsWith('WIN')).map(w => (
                 <div key={w.seatIndex}>
                   <h2 className="text-lg font-bold gold-text font-display">
@@ -668,7 +772,7 @@ export default function GameTable() {
         {gameState.phase === 'waiting' ? (
           <div className="px-3 py-3 text-center" style={{
             background: 'rgba(4,4,6,0.95)',
-            borderTop: '1px solid rgba(255,255,255,0.03)',
+            borderTop: '1px solid rgba(255,255,255,0.04)',
           }}>
             <div className="text-sm text-gray-400 font-medium">Waiting for players...</div>
             <div className="text-[10px] text-gray-600 mt-0.5 font-mono-poker">{gameState.players.length} / {tableSize} seated</div>
@@ -676,16 +780,22 @@ export default function GameTable() {
         ) : isMyTurn ? (
           /* YOUR TURN */
           <div className="px-2 py-2 space-y-1.5" style={{
-            background: 'rgba(4,4,6,0.96)',
-            backdropFilter: 'blur(24px)',
-            borderTop: '2px solid rgba(212,175,55,0.2)',
+            background: 'linear-gradient(0deg, rgba(4,4,6,0.98) 0%, rgba(4,4,6,0.95) 100%)',
+            borderTop: '2px solid rgba(212,175,55,0.25)',
+            boxShadow: '0 -4px 20px rgba(0,0,0,0.3)',
           }}>
             {/* YOUR TURN label */}
             <div className="text-center">
-              <span className="text-[9px] font-bold text-gold animate-pulse uppercase tracking-[0.2em]">Your Turn</span>
+              <motion.span
+                className="text-[9px] font-bold text-gold uppercase tracking-[0.2em]"
+                animate={{ opacity: [0.6, 1, 0.6] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+              >
+                Your Turn
+              </motion.span>
             </div>
 
-            {/* Raise slider */}
+            {/* Raise panel */}
             <AnimatePresence>
               {showRaise && (
                 <motion.div
@@ -695,22 +805,26 @@ export default function GameTable() {
                   className="overflow-hidden"
                 >
                   {/* Presets */}
-                  <div className="flex gap-1 mb-1.5">
+                  <div className="flex gap-1 mb-1.5 flex-wrap">
                     {raisePresets.map(p => (
                       <button key={p.label} onClick={() => setRaiseAmount(p.value)}
-                        className={`flex-1 py-1 rounded-lg text-[8px] sm:text-[9px] font-bold transition-all ${
+                        className={`px-2 py-1 rounded-lg text-[8px] sm:text-[9px] font-bold transition-all ${
                           raiseAmount === p.value
                             ? 'bg-gold/15 text-gold border border-gold/30'
-                            : 'glass-card text-gray-500 hover:text-gray-300'
-                        }`}>
+                            : 'text-gray-500 hover:text-gray-300'
+                        }`}
+                        style={{
+                          background: raiseAmount === p.value ? undefined : 'rgba(255,255,255,0.04)',
+                          border: raiseAmount === p.value ? undefined : '1px solid rgba(255,255,255,0.06)',
+                        }}>
                         {p.label}
                       </button>
                     ))}
                   </div>
                   {/* Slider + confirm */}
                   <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-[9px] sm:text-[10px] font-bold text-gold font-mono-poker w-12 text-right">
-                      {raiseAmount >= 1000 ? `${(raiseAmount / 1000).toFixed(1)}k` : raiseAmount.toLocaleString()}
+                    <span className="text-[10px] sm:text-[11px] font-bold text-gold font-mono-poker w-14 text-right">
+                      {formatChipAmount(raiseAmount)}
                     </span>
                     <input
                       type="range"
@@ -725,7 +839,7 @@ export default function GameTable() {
                       }}
                     />
                     <button onClick={() => handleAction('raise', raiseAmount)}
-                      className="btn-primary-poker px-3 py-1.5 rounded-lg text-[9px] sm:text-[10px] font-bold tracking-wider">
+                      className="btn-primary-poker px-4 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-bold tracking-wider">
                       RAISE
                     </button>
                   </div>
@@ -734,15 +848,15 @@ export default function GameTable() {
             </AnimatePresence>
 
             {/* Main action buttons */}
-            <div className="flex gap-1 sm:gap-1.5">
+            <div className="flex gap-1.5 sm:gap-2">
               {/* FOLD */}
               <button onClick={() => handleAction('fold')}
-                className="flex-1 py-2.5 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all active:scale-95 tracking-wider"
+                className="flex-1 py-3 rounded-xl text-[11px] sm:text-xs font-bold transition-all active:scale-95 tracking-wider"
                 style={{
                   background: 'linear-gradient(135deg, #7f1d1d, #450a0a)',
                   color: '#fca5a5',
-                  border: '1px solid rgba(220,38,38,0.2)',
-                  boxShadow: '0 2px 8px rgba(127,29,29,0.3)',
+                  border: '1px solid rgba(220,38,38,0.25)',
+                  boxShadow: '0 2px 12px rgba(127,29,29,0.3)',
                 }}>
                 FOLD
               </button>
@@ -750,51 +864,51 @@ export default function GameTable() {
               {/* CHECK / CALL */}
               {canCheck ? (
                 <button onClick={() => handleAction('check')}
-                  className="flex-1 py-2.5 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all active:scale-95 tracking-wider"
+                  className="flex-1 py-3 rounded-xl text-[11px] sm:text-xs font-bold transition-all active:scale-95 tracking-wider"
                   style={{
                     background: 'linear-gradient(135deg, #065f46, #022c22)',
                     color: '#6ee7b7',
-                    border: '1px solid rgba(16,185,129,0.2)',
-                    boxShadow: '0 2px 8px rgba(6,95,70,0.3)',
+                    border: '1px solid rgba(16,185,129,0.25)',
+                    boxShadow: '0 2px 12px rgba(6,95,70,0.3)',
                   }}>
                   CHECK
                 </button>
               ) : (
                 <button onClick={() => handleAction('call')}
-                  className="flex-1 py-2.5 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all active:scale-95 tracking-wider"
+                  className="flex-1 py-3 rounded-xl text-[11px] sm:text-xs font-bold transition-all active:scale-95 tracking-wider"
                   style={{
                     background: 'linear-gradient(135deg, #065f46, #022c22)',
                     color: '#6ee7b7',
-                    border: '1px solid rgba(16,185,129,0.2)',
-                    boxShadow: '0 2px 8px rgba(6,95,70,0.3)',
+                    border: '1px solid rgba(16,185,129,0.25)',
+                    boxShadow: '0 2px 12px rgba(6,95,70,0.3)',
                   }}>
-                  CALL {callAmount >= 1000 ? `${(callAmount / 1000).toFixed(1)}k` : callAmount.toLocaleString()}
+                  CALL {formatChipAmount(callAmount)}
                 </button>
               )}
 
               {/* RAISE toggle */}
               <button onClick={() => setShowRaise(!showRaise)}
-                className="flex-1 py-2.5 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all active:scale-95 tracking-wider"
+                className="flex-1 py-3 rounded-xl text-[11px] sm:text-xs font-bold transition-all active:scale-95 tracking-wider"
                 style={{
                   background: showRaise
                     ? 'rgba(212,175,55,0.1)'
                     : 'linear-gradient(135deg, #D4AF37, #9A7B1F)',
                   color: showRaise ? '#D4AF37' : '#0a0a0f',
-                  border: showRaise ? '1px solid rgba(212,175,55,0.2)' : '1px solid rgba(212,175,55,0.3)',
-                  boxShadow: showRaise ? 'none' : '0 2px 8px rgba(212,175,55,0.2)',
+                  border: showRaise ? '1px solid rgba(212,175,55,0.25)' : '1px solid rgba(212,175,55,0.4)',
+                  boxShadow: showRaise ? 'none' : '0 2px 12px rgba(212,175,55,0.25)',
                 }}>
-                RAISE
+                {canCheck ? 'BET' : 'RAISE'}
               </button>
 
               {/* ALL IN */}
               {heroPlayer && heroPlayer.chipStack > 0 && (
                 <button onClick={() => handleAction('allin')}
-                  className="py-2.5 px-2 rounded-xl text-[8px] sm:text-[9px] font-bold transition-all active:scale-95 tracking-wider"
+                  className="py-3 px-3 rounded-xl text-[9px] sm:text-[10px] font-bold transition-all active:scale-95 tracking-wider"
                   style={{
                     background: 'linear-gradient(135deg, #c2410c, #7c2d12)',
                     color: '#fed7aa',
-                    border: '1px solid rgba(234,88,12,0.2)',
-                    boxShadow: '0 2px 8px rgba(194,65,12,0.3)',
+                    border: '1px solid rgba(234,88,12,0.25)',
+                    boxShadow: '0 2px 12px rgba(194,65,12,0.3)',
                   }}>
                   ALL IN
                 </button>
@@ -805,14 +919,14 @@ export default function GameTable() {
           /* NOT YOUR TURN */
           <div className="px-2 py-2" style={{
             background: 'rgba(4,4,6,0.95)',
-            borderTop: '1px solid rgba(255,255,255,0.03)',
+            borderTop: '1px solid rgba(255,255,255,0.04)',
           }}>
             {heroPlayer?.folded ? (
-              <div className="text-center py-1">
+              <div className="text-center py-1.5">
                 <span className="text-[10px] text-gray-600 tracking-wider">Folded — waiting for next hand</span>
               </div>
             ) : gameState.phase === 'showdown' ? (
-              <div className="text-center py-1">
+              <div className="text-center py-1.5">
                 <span className="text-[10px] text-gray-500">Showdown — revealing cards...</span>
               </div>
             ) : (
@@ -824,31 +938,43 @@ export default function GameTable() {
                 <div className="flex gap-1">
                   <button
                     onClick={() => setPreAction(preAction === 'check_fold' ? null : 'check_fold')}
-                    className={`flex-1 py-1.5 rounded-lg text-[9px] font-bold transition-all tracking-wider ${
+                    className={`flex-1 py-2 rounded-lg text-[9px] font-bold transition-all tracking-wider ${
                       preAction === 'check_fold'
                         ? 'bg-red-900/20 text-red-400/80 border border-red-500/20'
-                        : 'glass-card text-gray-500 hover:text-gray-300'
+                        : 'text-gray-500 hover:text-gray-300'
                     }`}
+                    style={{
+                      background: preAction === 'check_fold' ? undefined : 'rgba(255,255,255,0.03)',
+                      border: preAction === 'check_fold' ? undefined : '1px solid rgba(255,255,255,0.05)',
+                    }}
                   >
                     {preAction === 'check_fold' ? '✓ ' : ''}Check/Fold
                   </button>
                   <button
                     onClick={() => setPreAction(preAction === 'call_any' ? null : 'call_any')}
-                    className={`flex-1 py-1.5 rounded-lg text-[9px] font-bold transition-all tracking-wider ${
+                    className={`flex-1 py-2 rounded-lg text-[9px] font-bold transition-all tracking-wider ${
                       preAction === 'call_any'
                         ? 'bg-emerald-900/20 text-emerald-400/80 border border-emerald-500/20'
-                        : 'glass-card text-gray-500 hover:text-gray-300'
+                        : 'text-gray-500 hover:text-gray-300'
                     }`}
+                    style={{
+                      background: preAction === 'call_any' ? undefined : 'rgba(255,255,255,0.03)',
+                      border: preAction === 'call_any' ? undefined : '1px solid rgba(255,255,255,0.05)',
+                    }}
                   >
                     {preAction === 'call_any' ? '✓ ' : ''}Call Any
                   </button>
                   <button
                     onClick={() => setPreAction(preAction === 'fold_to_bet' ? null : 'fold_to_bet')}
-                    className={`flex-1 py-1.5 rounded-lg text-[9px] font-bold transition-all tracking-wider ${
+                    className={`flex-1 py-2 rounded-lg text-[9px] font-bold transition-all tracking-wider ${
                       preAction === 'fold_to_bet'
                         ? 'bg-orange-900/20 text-orange-400/80 border border-orange-500/20'
-                        : 'glass-card text-gray-500 hover:text-gray-300'
+                        : 'text-gray-500 hover:text-gray-300'
                     }`}
+                    style={{
+                      background: preAction === 'fold_to_bet' ? undefined : 'rgba(255,255,255,0.03)',
+                      border: preAction === 'fold_to_bet' ? undefined : '1px solid rgba(255,255,255,0.05)',
+                    }}
                   >
                     {preAction === 'fold_to_bet' ? '✓ ' : ''}Fold to Bet
                   </button>

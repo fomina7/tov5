@@ -144,3 +144,18 @@
 - [x] Diagnose why poker game doesn't work (findNextActionSeat bug - used players.length instead of max seat index)
 - [x] Fix all blocking issues (seat iteration, bot raise amounts, raise cap per street)
 - [x] Verify full game cycle works end-to-end (hands complete through all phases with rake)
+
+## Premium Design Overhaul (TON Poker Style)
+- [ ] GameTable: Vertical oval table with green felt gradient and glowing white border
+- [ ] GameTable: Atmospheric background with particles (dark purple/brown)
+- [ ] GameTable: Improved card design - larger, clearer with proper suit symbols
+- [ ] GameTable: Gold bet pills next to players
+- [ ] GameTable: Action buttons in TON Poker style (Fold red, Call green, Raise yellow)
+- [ ] GameTable: Raise presets panel (Min, 3BB, 5BB, All In)
+- [ ] GameTable: Empty seats with SIT button
+- [ ] GameTable: Game info label (NLH ~ 0.02/0.05 6MAX)
+- [ ] GameTable: Player level badges
+- [ ] GameTable: Dealer button as gold circle on avatar
+- [ ] GameTable: Chat/emoji buttons at bottom
+- [ ] GameTable: Improved pot display with chip icon
+- [ ] GameTable: Hand ID shown in center of table
