@@ -330,3 +330,10 @@
 - [x] Verify registration works on Railway (email/password registration tested)
 - [x] Verify full game flow works on Railway (register -> login -> lobby -> join table -> play)
 - [x] Test and fix all errors found during testing (WebSocket disconnect, transport upgrade failure)
+
+## v15 - Fix Bots Freezing / Game Crashing on Player Join
+- [ ] Diagnose bot freeze when player joins table on Railway
+- [ ] Fix game crash / bot freeze issue
+- [ ] Verify bots continue playing after player joins
+- [ ] Verify full hand completes without freezing
+- [ ] Test multiple hands in succession

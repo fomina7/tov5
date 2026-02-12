@@ -2,6 +2,7 @@ import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
 import { useCallback, useEffect, useMemo } from "react";
+import { AUTH_TOKEN_KEY } from "@/main";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -36,6 +37,8 @@ export function useAuth(options?: UseAuthOptions) {
       }
       throw error;
     } finally {
+      // Clear token from localStorage
+      localStorage.removeItem(AUTH_TOKEN_KEY);
       utils.auth.me.setData(undefined, null);
       await utils.auth.me.invalidate();
     }

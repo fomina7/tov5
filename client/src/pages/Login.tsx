@@ -4,6 +4,7 @@ import { trpc } from '@/lib/trpc';
 import { useTheme } from '@/contexts/ThemeContext';
 import { motion } from 'framer-motion';
 import { Eye, EyeOff, Mail, Lock, User, Spade } from 'lucide-react';
+import { AUTH_TOKEN_KEY } from '@/main';
 
 export default function Login() {
   const [, navigate] = useLocation();
@@ -28,15 +29,20 @@ export default function Login() {
     setLoading(true);
 
     try {
+      let result: any;
       if (mode === 'login') {
-        await loginMutation.mutateAsync({ email, password });
+        result = await loginMutation.mutateAsync({ email, password });
       } else {
         if (name.length < 2) {
           setError('Name must be at least 2 characters');
           setLoading(false);
           return;
         }
-        await registerMutation.mutateAsync({ email, password, name });
+        result = await registerMutation.mutateAsync({ email, password, name });
+      }
+      // Save token to localStorage
+      if (result?.token) {
+        localStorage.setItem(AUTH_TOKEN_KEY, result.token);
       }
       window.location.href = '/';
     } catch (err: any) {
@@ -50,7 +56,11 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      await guestMutation.mutateAsync();
+      const result = await guestMutation.mutateAsync();
+      // Save token to localStorage
+      if (result?.token) {
+        localStorage.setItem(AUTH_TOKEN_KEY, result.token);
+      }
       window.location.href = '/';
     } catch (err: any) {
       setError(err.message || 'Something went wrong');

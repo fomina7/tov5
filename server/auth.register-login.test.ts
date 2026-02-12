@@ -44,7 +44,8 @@ describe("auth.register", () => {
       name: "Test Player",
     });
 
-    expect(result).toEqual({ success: true });
+    expect(result.success).toBe(true);
+    expect(result.token).toBeTruthy();
     expect(setCookies).toHaveLength(1);
     expect(setCookies[0]?.name).toBe(COOKIE_NAME);
     expect(setCookies[0]?.value).toBeTruthy(); // JWT token
@@ -127,7 +128,8 @@ describe("auth.login", () => {
       password: "mypassword123",
     });
 
-    expect(result).toEqual({ success: true });
+    expect(result.success).toBe(true);
+    expect(result.token).toBeTruthy();
     expect(setCookies).toHaveLength(1);
     expect(setCookies[0]?.name).toBe(COOKIE_NAME);
     expect(setCookies[0]?.value).toBeTruthy();

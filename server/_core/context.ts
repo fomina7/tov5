@@ -47,15 +47,29 @@ async function verifySession(
   }
 }
 
+/**
+ * Extract JWT token from request - checks Authorization header first, then cookie
+ */
+function extractToken(req: CreateExpressContextOptions["req"]): string | undefined {
+  // 1. Check Authorization header (Bearer token)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    return authHeader.slice(7);
+  }
+
+  // 2. Fall back to cookie
+  const cookies = parseCookies(req.headers.cookie);
+  return cookies.get(COOKIE_NAME);
+}
+
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
   let user: User | null = null;
 
   try {
-    const cookies = parseCookies(opts.req.headers.cookie);
-    const sessionCookie = cookies.get(COOKIE_NAME);
-    const session = await verifySession(sessionCookie);
+    const token = extractToken(opts.req);
+    const session = await verifySession(token);
 
     if (session) {
       const dbUser = await db.getUserByOpenId(session.openId);

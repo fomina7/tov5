@@ -7,6 +7,9 @@ import superjson from "superjson";
 import App from "./App";
 import "./index.css";
 
+// Token storage key
+export const AUTH_TOKEN_KEY = "poker_auth_token";
+
 const queryClient = new QueryClient();
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
@@ -17,7 +20,7 @@ const redirectToLoginIfUnauthorized = (error: unknown) => {
 
   if (!isUnauthorized) return;
 
-  // Redirect to our own login page instead of Manus OAuth
+  // Redirect to our own login page
   if (window.location.pathname !== '/login') {
     window.location.href = '/login';
   }
@@ -44,10 +47,18 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
+      headers() {
+        // Send JWT token from localStorage in Authorization header
+        const token = localStorage.getItem(AUTH_TOKEN_KEY);
+        if (token) {
+          return { Authorization: `Bearer ${token}` };
+        }
+        return {};
+      },
       fetch(input, init) {
         return globalThis.fetch(input, {
           ...(init ?? {}),
-          credentials: "include",
+          credentials: "include", // Still send cookies as fallback
         });
       },
     }),

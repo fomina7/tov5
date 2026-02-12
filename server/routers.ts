@@ -59,7 +59,7 @@ export const appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
-      return { success: true };
+      return { success: true, token: sessionToken };
     }),
 
     // Email/Password Login
@@ -87,7 +87,7 @@ export const appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
-      return { success: true };
+      return { success: true, token: sessionToken };
     }),
 
     // Telegram WebApp Auth
@@ -141,7 +141,7 @@ export const appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
-      return { success: true };
+      return { success: true, token: sessionToken };
     }),
 
     // Guest login (for browsing without account)
@@ -169,7 +169,7 @@ export const appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
-      return { success: true, guestName: name };
+      return { success: true, guestName: name, token: sessionToken };
     }),
   }),
 
