@@ -47,7 +47,7 @@
 ## Admin Panel
 - [x] Admin dashboard with stats
 - [x] View all users with balance info
-- [ ] View player cards at tables (admin_view_table event exists)
+- [x] View player cards at tables (admin panel with real-time card viewing)
 - [x] Manage player balances (adjust balance)
 - [x] Bot management (auto-fill bots)
 - [ ] RNG control
@@ -108,3 +108,34 @@
 - [x] Lobby page: sleek premium table cards with live player indicators
 - [x] GameTable: premium photorealistic felt, elegant card design, polished HUD
 - [x] Full mobile-first responsive across all pages
+
+## Major Fix Pass (User Request: "nothing works")
+- [x] Fix poker engine: hands must complete full cycle (preflop→flop→turn→river→showdown→new hand)
+- [x] Fix bots: must not get stuck, must play through all streets
+- [x] Fix hero cards: always visible when dealt
+- [x] Fix action buttons: always show on hero's turn
+- [x] Fix timer: must count down correctly and auto-fold
+- [x] Fix game progression: new hand must start after showdown
+- [x] Fix bot action scheduling: bots must continue playing after hero folds
+- [x] Admin panel: bot management (add/remove/configure bots per table)
+- [x] Admin panel: view player cards at tables
+- [x] Admin panel: table monitoring (live view of all tables)
+- [x] Fix mobile responsiveness across all pages
+- [ ] Push to GitHub as new version
+
+## Complete Rewrite - Real Poker Engine (v4)
+- [x] Real poker engine: proper deck, shuffle, hand evaluation (Royal Flush to High Card)
+- [x] Proper betting rounds: preflop, flop, turn, river with correct action validation
+- [x] Side pots: multiple all-in scenarios with proper pot splitting
+- [ ] Split pots: identical hand rankings
+- [x] Rake system: configurable percentage, min/max caps per table
+- [x] Rakeback system: configurable return percentage, VIP levels
+- [x] Smart bots: beginner/medium/pro with configurable aggression, bluff frequency
+- [x] Admin panel: bot management (add/remove/configure bots per table)
+- [x] Admin panel: view all player cards in real-time
+- [x] Admin panel: table monitoring with live state
+- [x] Admin panel: rake/rakeback configuration
+- [x] Game manager: proper hand history logging to DB
+- [x] Game manager: reconnect handling, auto-fold on timeout
+- [x] GameTable UI: work with new engine, show rake taken
+- [ ] Push to GitHub as new version

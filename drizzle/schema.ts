@@ -25,6 +25,10 @@ export const users = mysqlTable("users", {
   balanceReal: bigint("balanceReal", { mode: "number" }).default(0).notNull(),
   balanceBonus: bigint("balanceBonus", { mode: "number" }).default(0).notNull(),
   tournamentTickets: int("tournamentTickets").default(0).notNull(),
+  // Rakeback
+  rakebackBalance: bigint("rakebackBalance", { mode: "number" }).default(0).notNull(),
+  totalRakeGenerated: bigint("totalRakeGenerated", { mode: "number" }).default(0).notNull(),
+  rakebackPercentage: int("rakebackPercentage").default(10).notNull(), // 10% default
   // Stats
   handsPlayed: int("handsPlayed").default(0).notNull(),
   handsWon: int("handsWon").default(0).notNull(),
@@ -50,6 +54,13 @@ export const gameTables = mysqlTable("gameTables", {
   bigBlind: int("bigBlind").notNull(),
   minBuyIn: int("minBuyIn").notNull(),
   maxBuyIn: int("maxBuyIn").notNull(),
+  // Rake config
+  rakePercentage: int("rakePercentage").default(5).notNull(), // 5%
+  rakeCap: int("rakeCap").default(0).notNull(), // 0 = auto (5x BB)
+  // Bot config
+  botsEnabled: boolean("botsEnabled").default(true).notNull(),
+  botCount: int("botCount").default(2).notNull(),
+  botDifficulty: mysqlEnum("botDifficulty", ["beginner", "medium", "pro", "mixed"]).default("mixed").notNull(),
   // Current state
   status: mysqlEnum("status", ["waiting", "playing", "paused"]).default("waiting").notNull(),
   playerCount: int("playerCount").default(0).notNull(),
@@ -125,3 +136,29 @@ export const adminLogs = mysqlTable("adminLogs", {
 });
 
 export type AdminLog = typeof adminLogs.$inferSelect;
+
+// ─── Bot Configurations ─────────────────────────────────
+export const botConfigs = mysqlTable("botConfigs", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 64 }).notNull(),
+  avatar: varchar("avatar", { length: 512 }).notNull(),
+  difficulty: mysqlEnum("difficulty", ["beginner", "medium", "pro"]).default("medium").notNull(),
+  personality: varchar("personality", { length: 64 }).default("balanced").notNull(), // aggressive, tight, loose, balanced
+  isActive: boolean("isActive").default(true).notNull(),
+  gamesPlayed: int("gamesPlayed").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type BotConfig = typeof botConfigs.$inferSelect;
+
+// ─── Rake Ledger ────────────────────────────────────────
+export const rakeLedger = mysqlTable("rakeLedger", {
+  id: int("id").autoincrement().primaryKey(),
+  tableId: int("tableId").notNull(),
+  handNumber: int("handNumber").notNull(),
+  potAmount: bigint("potAmount", { mode: "number" }).notNull(),
+  rakeAmount: bigint("rakeAmount", { mode: "number" }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type RakeLedgerRow = typeof rakeLedger.$inferSelect;

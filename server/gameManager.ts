@@ -1,6 +1,6 @@
 /**
  * Game Manager — manages all active poker tables via WebSocket
- * Each table has its own GameState. Players connect via socket.io.
+ * Handles game flow, rake collection, rakeback, bot management, admin API.
  */
 import { Server as SocketServer, Socket } from "socket.io";
 import { Server as HttpServer } from "http";
@@ -12,16 +12,14 @@ import {
   getBotAction,
   sanitizeForPlayer,
   sanitizeForAdmin,
-  createDeck,
+  RakeConfig,
 } from "./pokerEngine";
 import { getDb } from "./db";
-import { gameTables, tablePlayers, handHistory, users, transactions } from "../drizzle/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { gameTables, handHistory, users, transactions, rakeLedger, botConfigs } from "../drizzle/schema";
+import { eq, sql, desc } from "drizzle-orm";
 
-const BOT_NAMES = ["AlphaBot", "PokerMind", "CardShark", "BluffMaster", "ChipKing", "AceHunter", "RiverRat", "NutCrusher"];
-const BOT_AVATARS = [
-  "fox", "shark", "owl", "cat", "bear", "monkey", "wolf", "penguin"
-];
+const DEFAULT_BOT_NAMES = ["AlphaBot", "PokerMind", "CardShark", "BluffMaster", "ChipKing", "AceHunter", "RiverRat", "NutCrusher"];
+const DEFAULT_BOT_AVATARS = ["fox", "shark", "owl", "cat", "bear", "monkey", "wolf", "penguin"];
 
 interface TableRoom {
   state: GameState;
@@ -30,6 +28,7 @@ interface TableRoom {
   botTimers: Map<number, NodeJS.Timeout>;
   dealTimer?: NodeJS.Timeout;
   actionTimer?: NodeJS.Timeout;
+  tableConfig?: any; // cached table config from DB
 }
 
 class GameManager {
@@ -77,18 +76,16 @@ class GameManager {
       });
     });
 
-    // Initialize default tables
     this.initDefaultTables();
   }
 
+  // ─── Table Initialization ──────────────────────────────
   private async initDefaultTables() {
     const db = await getDb();
     if (!db) return;
 
-    // Check if tables exist
     const existing = await db.select().from(gameTables);
     if (existing.length === 0) {
-      // Create default tables
       const defaultTables = [
         { name: "Micro Stakes", smallBlind: 1, bigBlind: 2, minBuyIn: 40, maxBuyIn: 200, tableSize: "6" as const },
         { name: "Low Stakes", smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 1000, tableSize: "6" as const },
@@ -97,25 +94,36 @@ class GameManager {
         { name: "Heads Up", smallBlind: 10, bigBlind: 20, minBuyIn: 400, maxBuyIn: 2000, tableSize: "2" as const },
         { name: "Full Ring", smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 1000, tableSize: "9" as const },
       ];
-
       for (const t of defaultTables) {
         await db.insert(gameTables).values(t);
       }
     }
+
+    // Seed default bot configs if empty
+    const existingBots = await db.select().from(botConfigs);
+    if (existingBots.length === 0) {
+      for (let i = 0; i < DEFAULT_BOT_NAMES.length; i++) {
+        await db.insert(botConfigs).values({
+          name: DEFAULT_BOT_NAMES[i],
+          avatar: DEFAULT_BOT_AVATARS[i],
+          difficulty: (["beginner", "medium", "pro"] as const)[i % 3],
+          personality: (["aggressive", "tight", "loose", "balanced"] as const)[i % 4],
+        });
+      }
+    }
   }
 
+  // ─── Join Table ────────────────────────────────────────
   private async handleJoinTable(socket: Socket, data: { tableId: number; userId: number; seatIndex?: number }) {
     const db = await getDb();
     if (!db) return;
 
-    // Get table config
     const [tableConfig] = await db.select().from(gameTables).where(eq(gameTables.id, data.tableId));
     if (!tableConfig) {
       socket.emit("error", { message: "Table not found" });
       return;
     }
 
-    // Get user
     const [user] = await db.select().from(users).where(eq(users.id, data.userId));
     if (!user) {
       socket.emit("error", { message: "User not found" });
@@ -126,14 +134,19 @@ class GameManager {
     let room = this.tables.get(data.tableId);
 
     if (!room) {
-      // Create new room
+      const rakeConfig: RakeConfig = {
+        percentage: (tableConfig.rakePercentage || 5) / 100,
+        cap: tableConfig.rakeCap || tableConfig.bigBlind * 5,
+        minPotForRake: tableConfig.bigBlind * 4,
+      };
+
       const state: GameState = {
         tableId: data.tableId,
         phase: "waiting",
         communityCards: [],
         deck: [],
         players: [],
-        pots: [{ amount: 0, eligiblePlayerIds: [] }],
+        pots: [],
         currentBet: 0,
         minRaise: tableConfig.bigBlind,
         dealerSeat: 0,
@@ -145,21 +158,23 @@ class GameManager {
         handNumber: 0,
         actionDeadline: 0,
         lastRaiserSeat: -1,
-        roundActionCount: 0,
+        rake: rakeConfig,
+        rakeCollected: 0,
+        totalPotBeforeRake: 0,
       };
       room = {
         state,
         sockets: new Map(),
         userSockets: new Map(),
         botTimers: new Map(),
+        tableConfig,
       };
       this.tables.set(data.tableId, room);
     }
 
-    // Check if user is already at this table (reconnection)
+    // Reconnection check
     const existingPlayer = room.state.players.find(p => p.oddsUserId === data.userId && !p.isBot);
     if (existingPlayer) {
-      // Reconnect: update socket references
       existingPlayer.disconnected = false;
       room.sockets.set(existingPlayer.seatIndex, socket.id);
       room.userSockets.set(data.userId, socket.id);
@@ -167,17 +182,14 @@ class GameManager {
       (socket as any).__tableId = data.tableId;
       (socket as any).__seatIndex = existingPlayer.seatIndex;
       (socket as any).__userId = data.userId;
-      
-      // Send the player their seat index confirmation
       socket.emit("seat_assigned", { seatIndex: existingPlayer.seatIndex });
-      
       this.broadcastState(data.tableId);
       return;
     }
 
-    // Check balance for new join
+    // Balance check
     if (user.balanceReal < tableConfig.minBuyIn) {
-      socket.emit("error", { message: "Insufficient balance. Minimum buy-in: " + tableConfig.minBuyIn });
+      socket.emit("error", { message: `Insufficient balance. Minimum buy-in: ${tableConfig.minBuyIn}` });
       return;
     }
 
@@ -185,44 +197,31 @@ class GameManager {
     const occupiedSeats = room.state.players.map(p => p.seatIndex);
     let seatIndex = data.seatIndex ?? -1;
     if (seatIndex === -1 || occupiedSeats.includes(seatIndex)) {
-      // Find first available seat
       for (let i = 0; i < maxSeats; i++) {
-        if (!occupiedSeats.includes(i)) {
-          seatIndex = i;
-          break;
-        }
+        if (!occupiedSeats.includes(i)) { seatIndex = i; break; }
       }
     }
-
     if (seatIndex === -1 || occupiedSeats.includes(seatIndex)) {
       socket.emit("error", { message: "Table is full" });
       return;
     }
 
-    // Buy in (take from balance)
+    // Buy in
     const buyIn = Math.min(tableConfig.maxBuyIn, user.balanceReal);
-    await db.update(users).set({
-      balanceReal: sql`balanceReal - ${buyIn}`,
-    }).where(eq(users.id, data.userId));
-
-    // Record transaction
+    await db.update(users).set({ balanceReal: sql`balanceReal - ${buyIn}` }).where(eq(users.id, data.userId));
     await db.insert(transactions).values({
-      userId: data.userId,
-      type: "buy_in",
-      amount: -buyIn,
-      status: "completed",
+      userId: data.userId, type: "buy_in", amount: -buyIn, status: "completed",
       note: `Buy-in at ${tableConfig.name}`,
     });
 
-    // Add player to game state
     const player: PlayerState = {
-      oddsId: room.state.players.length,
       oddsUserId: data.userId,
       seatIndex,
       name: user.nickname || user.name || "Player",
       avatar: user.avatar || "fox",
       chipStack: buyIn,
       currentBet: 0,
+      totalBetThisHand: 0,
       holeCards: [],
       folded: true,
       allIn: false,
@@ -230,118 +229,135 @@ class GameManager {
       lastAction: undefined,
       disconnected: false,
       sittingOut: false,
+      hasActedThisRound: false,
     };
 
     room.state.players.push(player);
     room.sockets.set(seatIndex, socket.id);
     room.userSockets.set(data.userId, socket.id);
 
-    // Join socket room
     socket.join(`table_${data.tableId}`);
     (socket as any).__tableId = data.tableId;
     (socket as any).__seatIndex = seatIndex;
     (socket as any).__userId = data.userId;
-
-    // Send the player their seat index confirmation
     socket.emit("seat_assigned", { seatIndex });
 
-    // Update DB
     await db.update(gameTables).set({
       playerCount: room.state.players.filter(p => !p.isBot).length,
       status: "waiting",
     }).where(eq(gameTables.id, data.tableId));
 
-    // Fill with bots if needed
-    await this.fillBotsIfNeeded(room, maxSeats);
+    // Fill with bots if enabled
+    if (tableConfig.botsEnabled) {
+      await this.fillBotsIfNeeded(room, maxSeats, tableConfig);
+    }
 
-    // Broadcast state
     this.broadcastState(data.tableId);
 
-    // Start game if enough players
     const activePlayers = room.state.players.filter(p => p.chipStack > 0);
     if (activePlayers.length >= 2 && room.state.phase === "waiting") {
       this.startNewHand(data.tableId);
     }
   }
 
-  private async fillBotsIfNeeded(room: TableRoom, maxSeats: number) {
-    const humanCount = room.state.players.filter(p => !p.isBot).length;
+  // ─── Bot Management ────────────────────────────────────
+  private async fillBotsIfNeeded(room: TableRoom, maxSeats: number, tableConfig?: any) {
     const currentCount = room.state.players.length;
+    const targetBots = tableConfig?.botCount ?? 2;
+    const currentBots = room.state.players.filter(p => p.isBot).length;
+    const botsNeeded = Math.max(0, Math.min(targetBots, maxSeats - currentCount));
+    if (botsNeeded <= 0) return;
 
-    // Add bots to fill at least 3 seats (or up to maxSeats - 1)
-    const botsNeeded = Math.max(0, Math.min(3, maxSeats) - currentCount);
     const occupiedSeats = room.state.players.map(p => p.seatIndex);
-
-    // Distribute bots evenly around the table
-    // Find the hero seat (first human player)
     const heroSeat = room.state.players.find(p => !p.isBot)?.seatIndex ?? 0;
-    // Preferred bot positions: spread evenly around the table relative to hero
     const preferredOffsets = maxSeats <= 2 ? [1] : maxSeats <= 6 ? [2, 4, 3, 5, 1] : [3, 6, 1, 5, 2, 7, 4, 8];
     const preferredSeats = preferredOffsets.map(off => (heroSeat + off) % maxSeats);
 
+    // Load bot configs from DB
+    const db = await getDb();
+    let botConfigList: any[] = [];
+    if (db) {
+      botConfigList = await db.select().from(botConfigs).where(eq(botConfigs.isActive, true));
+    }
+
     for (let i = 0; i < botsNeeded; i++) {
       let seatIndex = -1;
-      // Try preferred seats first
       for (const ps of preferredSeats) {
-        if (!occupiedSeats.includes(ps)) {
-          seatIndex = ps;
-          break;
-        }
+        if (!occupiedSeats.includes(ps)) { seatIndex = ps; break; }
       }
-      // Fallback: any available seat
       if (seatIndex === -1) {
         for (let s = 0; s < maxSeats; s++) {
-          if (!occupiedSeats.includes(s)) {
-            seatIndex = s;
-            break;
-          }
+          if (!occupiedSeats.includes(s)) { seatIndex = s; break; }
         }
       }
       if (seatIndex === -1) break;
       occupiedSeats.push(seatIndex);
 
-      const botIdx = (currentCount + i) % BOT_NAMES.length;
-      const difficulties: Array<"beginner" | "medium" | "pro"> = ["beginner", "medium", "pro"];
+      // Pick bot config
+      const botIdx = (currentBots + i) % Math.max(1, botConfigList.length || DEFAULT_BOT_NAMES.length);
+      const cfg = botConfigList[botIdx];
+
+      let difficulty: "beginner" | "medium" | "pro" = "medium";
+      if (tableConfig?.botDifficulty === "mixed") {
+        difficulty = (["beginner", "medium", "pro"] as const)[Math.floor(Math.random() * 3)];
+      } else if (tableConfig?.botDifficulty) {
+        difficulty = tableConfig.botDifficulty as any;
+      } else if (cfg) {
+        difficulty = cfg.difficulty;
+      }
+
       const bot: PlayerState = {
-        oddsId: room.state.players.length,
         oddsUserId: null,
         seatIndex,
-        name: BOT_NAMES[botIdx],
-        avatar: BOT_AVATARS[botIdx],
+        name: cfg?.name || DEFAULT_BOT_NAMES[botIdx % DEFAULT_BOT_NAMES.length],
+        avatar: cfg?.avatar || DEFAULT_BOT_AVATARS[botIdx % DEFAULT_BOT_AVATARS.length],
         chipStack: room.state.bigBlind * 100,
         currentBet: 0,
+        totalBetThisHand: 0,
         holeCards: [],
         folded: true,
         allIn: false,
         isBot: true,
-        botDifficulty: difficulties[Math.floor(Math.random() * 3)],
+        botDifficulty: difficulty,
         lastAction: undefined,
         disconnected: false,
         sittingOut: false,
+        hasActedThisRound: false,
       };
       room.state.players.push(bot);
     }
   }
 
+  // ─── Game Flow ─────────────────────────────────────────
   private startNewHand(tableId: number) {
     const room = this.tables.get(tableId);
     if (!room) return;
 
-    room.state = createNewHand(room.state);
+    // Clear all timers
+    this.clearAllTimers(room);
 
+    room.state = createNewHand(room.state);
     if (room.state.phase === "waiting") return;
 
-    // Update DB
+    console.log(`[Game] Table ${tableId} - Hand #${room.state.handNumber} started. Phase: ${room.state.phase}. Action on seat ${room.state.actionSeat}`);
+
     this.updateTableInDb(tableId, room.state);
-
-    // Broadcast
     this.broadcastState(tableId);
+    this.scheduleNextAction(tableId);
+  }
 
-    // If action is on a bot, schedule bot action
-    this.scheduleBotAction(tableId);
+  private scheduleNextAction(tableId: number) {
+    const room = this.tables.get(tableId);
+    if (!room || room.state.phase === "waiting" || room.state.phase === "showdown") return;
 
-    // Start action timer
-    this.startActionTimer(tableId);
+    const actionPlayer = room.state.players.find(p => p.seatIndex === room.state.actionSeat);
+    if (!actionPlayer) return;
+
+    if (actionPlayer.isBot) {
+      this.scheduleBotAction(tableId);
+    } else {
+      this.startActionTimer(tableId);
+    }
   }
 
   private scheduleBotAction(tableId: number) {
@@ -351,23 +367,32 @@ class GameManager {
     const actionPlayer = room.state.players.find(p => p.seatIndex === room.state.actionSeat);
     if (!actionPlayer || !actionPlayer.isBot) return;
 
-    // Clear existing timer
     const existingTimer = room.botTimers.get(actionPlayer.seatIndex);
     if (existingTimer) clearTimeout(existingTimer);
 
-    // Bot thinks for 1-3 seconds
-    const thinkTime = 1000 + Math.random() * 2000;
+    const thinkTime = 800 + Math.random() * 1500;
     const timer = setTimeout(() => {
-      const botAction = getBotAction(room.state, actionPlayer);
-      room.state = processAction(room.state, actionPlayer.seatIndex, botAction.action, botAction.amount);
+      try {
+        const botAction = getBotAction(room.state, actionPlayer);
+        console.log(`[Bot] ${actionPlayer.name} at table ${tableId}: ${botAction.action}${botAction.amount ? ` ${botAction.amount}` : ''}`);
+        room.state = processAction(room.state, actionPlayer.seatIndex, botAction.action, botAction.amount);
+        this.broadcastState(tableId);
 
-      this.broadcastState(tableId);
-
-      if (room.state.phase === "showdown") {
-        this.handleShowdown(tableId);
-      } else {
-        this.scheduleBotAction(tableId);
-        this.startActionTimer(tableId);
+        if (room.state.phase === "showdown") {
+          this.handleShowdown(tableId);
+        } else {
+          this.scheduleNextAction(tableId);
+        }
+      } catch (e) {
+        console.error(`[Bot] Error processing bot action:`, e);
+        // Auto-fold on error
+        room.state = processAction(room.state, actionPlayer.seatIndex, "fold");
+        this.broadcastState(tableId);
+        if (room.state.phase === "showdown") {
+          this.handleShowdown(tableId);
+        } else {
+          this.scheduleNextAction(tableId);
+        }
       }
     }, thinkTime);
 
@@ -383,41 +408,39 @@ class GameManager {
     const actionPlayer = room.state.players.find(p => p.seatIndex === room.state.actionSeat);
     if (!actionPlayer || actionPlayer.isBot) return;
 
-    // 30 second timer for human players
     room.actionTimer = setTimeout(() => {
-      // Auto-fold on timeout
+      console.log(`[Timer] Auto-fold for seat ${room.state.actionSeat} at table ${tableId}`);
       room.state = processAction(room.state, room.state.actionSeat, "fold");
       this.broadcastState(tableId);
 
       if (room.state.phase === "showdown") {
         this.handleShowdown(tableId);
       } else {
-        this.scheduleBotAction(tableId);
-        this.startActionTimer(tableId);
+        this.scheduleNextAction(tableId);
       }
     }, 30000);
   }
 
-  private handleShowdown(tableId: number) {
+  private async handleShowdown(tableId: number) {
     const room = this.tables.get(tableId);
     if (!room) return;
 
-    // Save hand history
-    this.saveHandHistory(tableId, room.state);
+    console.log(`[Game] Table ${tableId} - Hand #${room.state.handNumber} showdown. Rake: ${room.state.rakeCollected}`);
 
-    // Update player stats in DB
-    this.updatePlayerStats(tableId, room.state);
+    // Save hand history with rake
+    await this.saveHandHistory(tableId, room.state);
+    await this.updatePlayerStats(tableId, room.state);
+    await this.recordRake(tableId, room.state);
+    await this.distributeRakeback(tableId, room.state);
 
-    // Broadcast final state
     this.broadcastState(tableId);
 
     // Start new hand after 4 seconds
-    room.dealTimer = setTimeout(() => {
+    room.dealTimer = setTimeout(async () => {
       // Remove busted players
       room.state.players = room.state.players.filter(p => {
         if (p.chipStack <= 0) {
           if (!p.isBot && p.oddsUserId) {
-            // Return 0 chips (they busted)
             this.cashOutPlayer(p.oddsUserId, 0, tableId);
           }
           return false;
@@ -425,9 +448,11 @@ class GameManager {
         return true;
       });
 
-      // Refill bots if needed
-      const maxSeats = 6; // TODO: get from table config
-      this.fillBotsIfNeeded(room, maxSeats);
+      // Refill bots
+      const maxSeats = parseInt(room.tableConfig?.tableSize || "6");
+      if (room.tableConfig?.botsEnabled !== false) {
+        await this.fillBotsIfNeeded(room, maxSeats, room.tableConfig);
+      }
 
       if (room.state.players.filter(p => p.chipStack > 0).length >= 2) {
         this.startNewHand(tableId);
@@ -438,6 +463,7 @@ class GameManager {
     }, 4000);
   }
 
+  // ─── Player Actions ────────────────────────────────────
   private handlePlayerAction(socket: Socket, data: { tableId: number; action: string; amount?: number }) {
     const room = this.tables.get(data.tableId);
     if (!room) return;
@@ -454,26 +480,21 @@ class GameManager {
       return;
     }
 
-    // Clear action timer
     if (room.actionTimer) clearTimeout(room.actionTimer);
 
-    room.state = processAction(
-      room.state,
-      seatIndex,
-      data.action as any,
-      data.amount
-    );
+    console.log(`[Player] Seat ${seatIndex} at table ${data.tableId}: ${data.action}${data.amount ? ` ${data.amount}` : ''}`);
 
+    room.state = processAction(room.state, seatIndex, data.action as any, data.amount);
     this.broadcastState(data.tableId);
 
     if (room.state.phase === "showdown") {
       this.handleShowdown(data.tableId);
     } else {
-      this.scheduleBotAction(data.tableId);
-      this.startActionTimer(data.tableId);
+      this.scheduleNextAction(data.tableId);
     }
   }
 
+  // ─── Leave / Disconnect ────────────────────────────────
   private handleLeaveTable(socket: Socket, tableId: number) {
     const room = this.tables.get(tableId);
     if (!room) return;
@@ -484,10 +505,8 @@ class GameManager {
     if (seatIndex !== undefined) {
       const player = room.state.players.find(p => p.seatIndex === seatIndex);
       if (player && !player.isBot && player.oddsUserId) {
-        // Cash out remaining chips
         this.cashOutPlayer(player.oddsUserId, player.chipStack, tableId);
       }
-
       room.state.players = room.state.players.filter(p => p.seatIndex !== seatIndex);
       room.sockets.delete(seatIndex);
       if (userId) room.userSockets.delete(userId);
@@ -507,7 +526,6 @@ class GameManager {
         const player = room.state.players.find(p => p.seatIndex === seatIndex);
         if (player) {
           player.disconnected = true;
-          // Give 60 seconds to reconnect, then auto-fold and cash out
           setTimeout(() => {
             if (player.disconnected) {
               if (player.oddsUserId) {
@@ -524,30 +542,75 @@ class GameManager {
     }
   }
 
+  // ─── Financial Operations ──────────────────────────────
   private async cashOutPlayer(userId: number, chips: number, tableId: number) {
     const db = await getDb();
     if (!db || chips <= 0) return;
 
-    await db.update(users).set({
-      balanceReal: sql`balanceReal + ${chips}`,
-    }).where(eq(users.id, userId));
-
+    await db.update(users).set({ balanceReal: sql`balanceReal + ${chips}` }).where(eq(users.id, userId));
     await db.insert(transactions).values({
-      userId,
-      type: "cash_out",
-      amount: chips,
-      status: "completed",
+      userId, type: "cash_out", amount: chips, status: "completed",
       note: `Cash out from table ${tableId}`,
     });
   }
 
+  private async recordRake(tableId: number, state: GameState) {
+    if (state.rakeCollected <= 0) return;
+    const db = await getDb();
+    if (!db) return;
+
+    try {
+      await db.insert(rakeLedger).values({
+        tableId,
+        handNumber: state.handNumber,
+        potAmount: state.totalPotBeforeRake,
+        rakeAmount: state.rakeCollected,
+      });
+    } catch (e) {
+      console.error("[Rake] Failed to record:", e);
+    }
+  }
+
+  private async distributeRakeback(tableId: number, state: GameState) {
+    if (state.rakeCollected <= 0) return;
+    const db = await getDb();
+    if (!db) return;
+
+    // Distribute rakeback to human players who participated
+    const humanPlayers = state.players.filter(p => !p.isBot && p.oddsUserId && p.totalBetThisHand > 0);
+    if (humanPlayers.length === 0) return;
+
+    // Each player gets rakeback proportional to their contribution
+    const totalBets = humanPlayers.reduce((s, p) => s + p.totalBetThisHand, 0);
+
+    for (const p of humanPlayers) {
+      if (!p.oddsUserId) continue;
+      try {
+        const [userRow] = await db.select().from(users).where(eq(users.id, p.oddsUserId));
+        if (!userRow) continue;
+
+        const rakeShare = Math.floor(state.rakeCollected * (p.totalBetThisHand / totalBets));
+        const rakebackPct = (userRow.rakebackPercentage || 10) / 100;
+        const rakebackAmount = Math.floor(rakeShare * rakebackPct);
+
+        if (rakebackAmount > 0) {
+          await db.update(users).set({
+            rakebackBalance: sql`rakebackBalance + ${rakebackAmount}`,
+            totalRakeGenerated: sql`totalRakeGenerated + ${rakeShare}`,
+          }).where(eq(users.id, p.oddsUserId));
+        }
+      } catch (e) {
+        console.error("[Rakeback] Failed:", e);
+      }
+    }
+  }
+
+  // ─── DB Operations ─────────────────────────────────────
   private async saveHandHistory(tableId: number, state: GameState) {
     const db = await getDb();
     if (!db) return;
 
-    const winner = state.players.find(p => p.lastAction?.startsWith("WIN"));
-    const totalPot = state.pots.reduce((s, p) => s + p.amount, 0) +
-      state.players.reduce((s, p) => s + p.currentBet, 0);
+    const winners = state.players.filter(p => p.lastAction?.startsWith("WIN") || p.lastAction?.startsWith("SPLIT"));
 
     try {
       await db.insert(handHistory).values({
@@ -560,17 +623,19 @@ class GameManager {
             holeCards: p.holeCards,
             chipStack: p.chipStack,
             lastAction: p.lastAction,
+            isBot: p.isBot,
           })),
           communityCards: state.communityCards,
           pots: state.pots,
         },
-        potTotal: totalPot,
-        winnerId: winner?.oddsUserId || null,
-        winnerName: winner?.name || null,
-        winningHand: winner?.lastAction?.replace("WIN - ", "") || null,
+        potTotal: state.totalPotBeforeRake,
+        rakeAmount: state.rakeCollected,
+        winnerId: winners[0]?.oddsUserId || null,
+        winnerName: winners.map(w => w.name).join(", ") || null,
+        winningHand: winners[0]?.lastAction?.replace(/^(WIN|SPLIT) - /, "") || null,
       });
     } catch (e) {
-      console.error("[GameManager] Failed to save hand history:", e);
+      console.error("[History] Failed to save:", e);
     }
   }
 
@@ -580,15 +645,14 @@ class GameManager {
 
     for (const p of state.players) {
       if (p.isBot || !p.oddsUserId) continue;
-
-      const isWinner = p.lastAction?.startsWith("WIN");
+      const isWinner = p.lastAction?.startsWith("WIN") || p.lastAction?.startsWith("SPLIT");
       try {
         await db.update(users).set({
           handsPlayed: sql`handsPlayed + 1`,
           handsWon: isWinner ? sql`handsWon + 1` : sql`handsWon`,
         }).where(eq(users.id, p.oddsUserId));
       } catch (e) {
-        console.error("[GameManager] Failed to update stats:", e);
+        console.error("[Stats] Failed:", e);
       }
     }
   }
@@ -596,25 +660,23 @@ class GameManager {
   private async updateTableInDb(tableId: number, state: GameState) {
     const db = await getDb();
     if (!db) return;
-
     try {
       await db.update(gameTables).set({
         status: state.phase === "waiting" ? "waiting" : "playing",
         playerCount: state.players.filter(p => !p.isBot).length,
       }).where(eq(gameTables.id, tableId));
     } catch (e) {
-      console.error("[GameManager] Failed to update table:", e);
+      console.error("[Table] Failed to update:", e);
     }
   }
 
+  // ─── Broadcast ─────────────────────────────────────────
   private broadcastState(tableId: number) {
     const room = this.tables.get(tableId);
     if (!room || !this.io) return;
 
-    // Collect all seated socket IDs so we can exclude them from spectator broadcast
     const seatedSocketIds = new Set<string>();
 
-    // Send personalized state to each seated player
     for (const [seatIndex, socketId] of Array.from(room.sockets.entries())) {
       seatedSocketIds.add(socketId);
       const socket = this.io.sockets.sockets.get(socketId);
@@ -623,8 +685,6 @@ class GameManager {
       }
     }
 
-    // Send spectator view ONLY to non-seated sockets in the room
-    // This prevents spectator_state from overwriting personalized game_state
     const roomSockets = this.io.sockets.adapter.rooms.get(`table_${tableId}`);
     if (roomSockets) {
       const spectatorState = sanitizeForPlayer(room.state, -1);
@@ -639,7 +699,17 @@ class GameManager {
     }
   }
 
-  // ─── Public API for tRPC ───────────────────────────────
+  // ─── Helpers ───────────────────────────────────────────
+  private clearAllTimers(room: TableRoom) {
+    if (room.actionTimer) { clearTimeout(room.actionTimer); room.actionTimer = undefined; }
+    if (room.dealTimer) { clearTimeout(room.dealTimer); room.dealTimer = undefined; }
+    for (const [, timer] of Array.from(room.botTimers.entries())) {
+      clearTimeout(timer);
+    }
+    room.botTimers.clear();
+  }
+
+  // ─── Public API for tRPC / Admin ───────────────────────
   getTableState(tableId: number, seatIndex: number) {
     const room = this.tables.get(tableId);
     if (!room) return null;
@@ -666,6 +736,87 @@ class GameManager {
       count += room.state.players.filter((p: PlayerState) => !p.isBot && !p.disconnected).length;
     }
     return count;
+  }
+
+  // Admin: get all table states for monitoring
+  getAllTableStates(): any[] {
+    const result: any[] = [];
+    for (const [tableId, room] of Array.from(this.tables.entries())) {
+      result.push({
+        tableId,
+        phase: room.state.phase,
+        handNumber: room.state.handNumber,
+        playerCount: room.state.players.length,
+        humanCount: room.state.players.filter(p => !p.isBot).length,
+        botCount: room.state.players.filter(p => p.isBot).length,
+        totalPot: room.state.pots.reduce((s, p) => s + p.amount, 0) +
+          room.state.players.reduce((s, p) => s + p.currentBet, 0),
+        rakeCollected: room.state.rakeCollected,
+      });
+    }
+    return result;
+  }
+
+  // Admin: add/remove bots from a specific table
+  async adminAddBot(tableId: number, botName?: string, difficulty?: string): Promise<boolean> {
+    const room = this.tables.get(tableId);
+    if (!room) return false;
+
+    const maxSeats = parseInt(room.tableConfig?.tableSize || "6");
+    const occupiedSeats = room.state.players.map(p => p.seatIndex);
+    let seatIndex = -1;
+    for (let s = 0; s < maxSeats; s++) {
+      if (!occupiedSeats.includes(s)) { seatIndex = s; break; }
+    }
+    if (seatIndex === -1) return false;
+
+    const botIdx = room.state.players.filter(p => p.isBot).length;
+    const bot: PlayerState = {
+      oddsUserId: null,
+      seatIndex,
+      name: botName || DEFAULT_BOT_NAMES[botIdx % DEFAULT_BOT_NAMES.length],
+      avatar: DEFAULT_BOT_AVATARS[botIdx % DEFAULT_BOT_AVATARS.length],
+      chipStack: room.state.bigBlind * 100,
+      currentBet: 0,
+      totalBetThisHand: 0,
+      holeCards: [],
+      folded: true,
+      allIn: false,
+      isBot: true,
+      botDifficulty: (difficulty as any) || "medium",
+      lastAction: undefined,
+      disconnected: false,
+      sittingOut: false,
+      hasActedThisRound: false,
+    };
+    room.state.players.push(bot);
+    this.broadcastState(tableId);
+    return true;
+  }
+
+  async adminRemoveBot(tableId: number, seatIndex: number): Promise<boolean> {
+    const room = this.tables.get(tableId);
+    if (!room) return false;
+
+    const player = room.state.players.find(p => p.seatIndex === seatIndex && p.isBot);
+    if (!player) return false;
+
+    room.state.players = room.state.players.filter(p => p.seatIndex !== seatIndex);
+    this.broadcastState(tableId);
+    return true;
+  }
+
+  // Admin: force start a new hand
+  adminForceNewHand(tableId: number): boolean {
+    const room = this.tables.get(tableId);
+    if (!room) return false;
+    this.clearAllTimers(room);
+    room.state.phase = "waiting";
+    if (room.state.players.filter(p => p.chipStack > 0).length >= 2) {
+      this.startNewHand(tableId);
+      return true;
+    }
+    return false;
   }
 }
 

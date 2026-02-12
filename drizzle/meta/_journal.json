@@ -15,6 +15,13 @@
       "when": 1770901752907,
       "tag": "0001_easy_silvermane",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1770912445254,
+      "tag": "0002_dry_baron_strucker",
+      "breakpoints": true
     }
   ]
 }

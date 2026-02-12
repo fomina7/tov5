@@ -404,9 +404,10 @@ export default function GameTable() {
     })).sort((a, b) => a.vi - b.vi);
   }, [gameState?.players, heroSeat, tableSize]);
 
-  const totalPot = gameState
-    ? gameState.pots.reduce((s, p) => s + p.amount, 0) + gameState.players.reduce((s, p) => s + p.currentBet, 0)
-    : 0;
+  const potTotal = gameState ? gameState.pots.reduce((s, p) => s + p.amount, 0) : 0;
+  const betsOnTable = gameState ? gameState.players.reduce((s, p) => s + p.currentBet, 0) : 0;
+  const totalPot = potTotal + betsOnTable;
+  const hasMultiplePots = gameState ? gameState.pots.filter(p => p.amount > 0).length > 1 : false;
 
   const handleAction = useCallback((action: string, amount?: number) => {
     sendAction(tableId, action, amount);
@@ -528,21 +529,33 @@ export default function GameTable() {
             {totalPot > 0 && (
               <motion.div
                 initial={{ scale: 0 }} animate={{ scale: 1 }}
-                className="absolute left-1/2 -translate-x-1/2 z-10 flex items-center gap-1"
+                className="absolute left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-0.5"
                 style={{
-                  top: '22%',
-                  background: 'rgba(0,0,0,0.8)',
+                  top: '18%',
+                  background: 'rgba(0,0,0,0.85)',
                   backdropFilter: 'blur(16px)',
                   borderRadius: 10,
-                  padding: '3px 8px',
+                  padding: '3px 10px',
                   border: '1px solid rgba(212,175,55,0.2)',
                   boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
                 }}
               >
-                <img src={ASSETS.chips.gold} alt="" className="w-3 h-3" style={{ filter: 'drop-shadow(0 1px 3px rgba(212,175,55,0.4))' }} />
-                <span className="text-[10px] sm:text-xs font-bold text-gold font-mono-poker">
-                  {totalPot.toLocaleString()}
-                </span>
+                <div className="flex items-center gap-1">
+                  <img src={ASSETS.chips.gold} alt="" className="w-3 h-3" style={{ filter: 'drop-shadow(0 1px 3px rgba(212,175,55,0.4))' }} />
+                  <span className="text-[10px] sm:text-xs font-bold text-gold font-mono-poker">
+                    {totalPot.toLocaleString()}
+                  </span>
+                </div>
+                {/* Side pots */}
+                {hasMultiplePots && (
+                  <div className="flex gap-1">
+                    {gameState!.pots.filter(p => p.amount > 0).map((pot, i) => (
+                      <span key={i} className="text-[7px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 font-mono-poker">
+                        {i === 0 ? 'Main' : `Side ${i}`}: {pot.amount}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </motion.div>
             )}
 
