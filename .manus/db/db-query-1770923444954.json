@@ -1,0 +1,18 @@
+{
+  "query": "SHOW COLUMNS FROM users LIKE 'passwordHash';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user JPPi4KWSC9uSqwy.e50ca6cb3452 --database diCBEAZbwppvACD82XAuCX --execute SHOW COLUMNS FROM users LIKE 'passwordHash';",
+  "rows": [
+    {
+      "Field": "passwordHash",
+      "Type": "varchar(256)",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    }
+  ],
+  "messages": [],
+  "stdout": "Field\tType\tNull\tKey\tDefault\tExtra\npasswordHash\tvarchar(256)\tYES\t\tNULL\t\n",
+  "stderr": "",
+  "execution_time_ms": 391
+}

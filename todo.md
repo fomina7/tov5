@@ -237,3 +237,62 @@
 - [x] Fix bug: action buttons showing when hero is folded
 - [x] Increase player name max-width from 80px to 100px
 - [x] Verify game is fully functional with real gameplay (hands complete, bots play, showdowns work)
+
+## v11 - Full TZ Implementation (Commercial Release)
+### Authentication
+- [x] Email/password registration page
+- [x] Email/password login page
+- [ ] Telegram WebApp auto-auth (initData validation)
+- [x] Password hashing (bcrypt)
+- [x] JWT session management
+- [x] Guest mode for browsing
+
+### Lobby Redesign (per TZ reference - TON Poker style)
+- [ ] Tabs: Cash / Tasks / Tournaments / Bet / More
+- [ ] Game type tabs: Texas Hold'em / Pot Limit Omaha
+- [ ] Stake level filters: Low / Mid / VIP
+- [ ] Table list with: blinds, buy-in range, max players, online count, Play button
+- [ ] Real-time online stats (players, bots, tables)
+- [ ] Deposit/Withdraw buttons prominent
+- [ ] User profile card (avatar, level, gems, balance)
+
+### Game Table Polish
+- [ ] All animations working (card deal, bet, win, turn transition)
+- [ ] All action buttons functional (Fold, Call, Raise, Check, All-in)
+- [ ] Community cards clearly visible
+- [ ] Pot display accurate
+- [ ] Timer countdown working
+- [ ] Chip stacks visual
+
+### Tournament System Complete
+- [ ] Admin: create tournaments (name, buy-in, prize pool, start time, blinds structure)
+- [ ] Tournament types: Sit&Go, MTT, Freeroll, Private
+- [ ] Registration / late registration
+- [ ] Auto-start when enough players
+- [ ] Bot fill for tournaments
+- [ ] Blind level increases
+- [ ] Table balancing
+- [ ] Final table
+
+### Admin Panel Complete
+- [ ] User management (view, ban/block, adjust balance)
+- [ ] Tournament management (create, start, cancel)
+- [ ] Bot configuration
+- [ ] Rake/commission settings
+- [ ] Real-time monitoring (online players, bots, tables, volume)
+- [ ] Game logs / hand history
+- [ ] Error logs
+
+### Dark/Light Theme All Pages
+- [ ] Home page both themes
+- [ ] Lobby both themes
+- [ ] Game table both themes
+- [ ] Tournaments both themes
+- [ ] Profile both themes
+- [ ] Cashier both themes
+- [ ] Admin panel both themes
+- [ ] Auth pages both themes
+
+### Final
+- [ ] Full end-to-end testing
+- [ ] Push to GitHub

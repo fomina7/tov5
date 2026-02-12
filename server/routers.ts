@@ -1,4 +1,4 @@
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
@@ -9,6 +9,9 @@ import { z } from "zod";
 import { gameManager } from "./gameManager";
 import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
+import bcrypt from "bcryptjs";
+import { sdk } from "./_core/sdk";
+import crypto from "crypto";
 
 export const appRouter = router({
   system: systemRouter,
@@ -19,6 +22,154 @@ export const appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
+    }),
+
+    // Email/Password Registration
+    register: publicProcedure.input(z.object({
+      email: z.string().email().max(320),
+      password: z.string().min(6).max(128),
+      name: z.string().min(2).max(64),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      // Check if email already exists
+      const existing = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+      if (existing.length > 0) throw new Error("Email already registered");
+
+      const passwordHash = await bcrypt.hash(input.password, 12);
+      const openId = `email_${crypto.randomUUID()}`;
+
+      await db.insert(users).values({
+        openId,
+        name: input.name,
+        email: input.email,
+        passwordHash,
+        nickname: input.name,
+        loginMethod: "email",
+        balanceReal: 10000, // Welcome bonus: 100.00 in cents
+        lastSignedIn: new Date(),
+      });
+
+      // Create session
+      const sessionToken = await sdk.createSessionToken(openId, {
+        name: input.name,
+        expiresInMs: ONE_YEAR_MS,
+      });
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+
+      return { success: true };
+    }),
+
+    // Email/Password Login
+    login: publicProcedure.input(z.object({
+      email: z.string().email(),
+      password: z.string().min(1),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const [user] = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+      if (!user || !user.passwordHash) throw new Error("Invalid email or password");
+
+      const valid = await bcrypt.compare(input.password, user.passwordHash);
+      if (!valid) throw new Error("Invalid email or password");
+
+      // Update last signed in
+      await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
+
+      // Create session
+      const sessionToken = await sdk.createSessionToken(user.openId, {
+        name: user.name || user.nickname || "Player",
+        expiresInMs: ONE_YEAR_MS,
+      });
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+
+      return { success: true };
+    }),
+
+    // Telegram WebApp Auth
+    telegramAuth: publicProcedure.input(z.object({
+      initData: z.string(),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      // Parse Telegram initData
+      const params = new URLSearchParams(input.initData);
+      const userDataStr = params.get("user");
+      if (!userDataStr) throw new Error("Invalid Telegram data");
+
+      let telegramUser: { id: number; first_name: string; last_name?: string; username?: string; photo_url?: string };
+      try {
+        telegramUser = JSON.parse(userDataStr);
+      } catch {
+        throw new Error("Invalid Telegram user data");
+      }
+
+      const telegramId = String(telegramUser.id);
+      const name = [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(" ");
+      const openId = `tg_${telegramId}`;
+
+      // Upsert user
+      const existing = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+      if (existing.length === 0) {
+        await db.insert(users).values({
+          openId,
+          name,
+          nickname: telegramUser.username || name,
+          telegramId,
+          avatar: telegramUser.photo_url || null,
+          loginMethod: "telegram",
+          balanceReal: 10000, // Welcome bonus
+          lastSignedIn: new Date(),
+        });
+      } else {
+        await db.update(users).set({
+          lastSignedIn: new Date(),
+          name,
+        }).where(eq(users.openId, openId));
+      }
+
+      // Create session
+      const sessionToken = await sdk.createSessionToken(openId, {
+        name,
+        expiresInMs: ONE_YEAR_MS,
+      });
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+
+      return { success: true };
+    }),
+
+    // Guest login (for browsing without account)
+    guestLogin: publicProcedure.mutation(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const guestId = crypto.randomUUID();
+      const openId = `guest_${guestId}`;
+      const name = `Guest_${guestId.slice(0, 6)}`;
+
+      await db.insert(users).values({
+        openId,
+        name,
+        nickname: name,
+        loginMethod: "guest",
+        balanceReal: 5000, // Small guest balance
+        lastSignedIn: new Date(),
+      });
+
+      const sessionToken = await sdk.createSessionToken(openId, {
+        name,
+        expiresInMs: ONE_YEAR_MS,
+      });
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+
+      return { success: true, guestName: name };
     }),
   }),
 

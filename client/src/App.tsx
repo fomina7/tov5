@@ -12,11 +12,13 @@ import Tournaments from "./pages/Tournaments";
 import Cashier from "./pages/Cashier";
 import More from "./pages/More";
 import Admin from "./pages/Admin";
+import Login from "./pages/Login";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
+      <Route path="/login" component={Login} />
       <Route path="/lobby" component={Lobby} />
       <Route path="/game/:tableId" component={GameTable} />
       <Route path="/profile" component={Profile} />

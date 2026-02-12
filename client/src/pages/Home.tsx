@@ -6,7 +6,7 @@ import { useAuth } from '@/_core/hooks/useAuth';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'wouter';
 import { ASSETS } from '@/lib/assets';
-import { getLoginUrl } from '@/const';
+
 import { trpc } from '@/lib/trpc';
 import { useMemo, useState, useEffect } from 'react';
 import HousePokerLogo from '@/components/HousePokerLogo';
@@ -89,7 +89,7 @@ function LiveDot() {
 }
 
 export default function Home() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const [, navigate] = useLocation();
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === 'dark';
@@ -234,7 +234,7 @@ export default function Home() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.3, duration: 0.5 }}
-          onClick={() => isAuthenticated ? navigate('/lobby') : window.location.href = getLoginUrl()}
+          onClick={() => isAuthenticated ? navigate('/lobby') : navigate('/login')}
           className="btn-primary-poker px-10 sm:px-14 py-3.5 sm:py-4 rounded-xl text-sm sm:text-base tracking-[0.15em] font-display font-bold relative overflow-hidden group"
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.97 }}
@@ -252,6 +252,7 @@ export default function Home() {
             className="mt-4 text-xs text-gray-500"
           >
             Welcome back, <span className={`font-medium ${isDark ? 'text-gold-light' : 'text-amber-800'}`}>{user.name}</span>
+            <button onClick={() => { logout(); }} className={`ml-2 underline ${isDark ? 'text-gray-400 hover:text-gray-300' : 'text-amber-700 hover:text-amber-900'}`}>Logout</button>
           </motion.div>
         )}
       </div>
