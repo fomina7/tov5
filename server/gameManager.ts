@@ -39,10 +39,10 @@ class GameManager {
     this.io = new SocketServer(httpServer, {
       cors: { origin: "*", methods: ["GET", "POST"] },
       path: "/api/socket.io",
-      pingTimeout: 30000,
-      pingInterval: 10000,
-      transports: ['polling', 'websocket'],
-      allowUpgrades: true,
+      pingTimeout: 60000,
+      pingInterval: 25000,
+      transports: ['polling'],
+      allowUpgrades: false,
       httpCompression: false,
     });
 

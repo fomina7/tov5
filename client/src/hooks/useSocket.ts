@@ -61,13 +61,13 @@ export function useSocket() {
   useEffect(() => {
     const socket = io({
       path: '/api/socket.io',
-      transports: ['polling', 'websocket'],
-      upgrade: true,
+      transports: ['polling'],
+      upgrade: false,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      timeout: 20000,
+      timeout: 30000,
     });
 
     socketRef.current = socket;
