@@ -3,7 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { users, gameTables, handHistory, transactions, adminLogs, botConfigs, rakeLedger } from "../drizzle/schema";
+import { users, gameTables, handHistory, transactions, adminLogs, botConfigs, rakeLedger, tournaments, tournamentEntries } from "../drizzle/schema";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 import { z } from "zod";
 import { gameManager } from "./gameManager";
@@ -206,9 +206,27 @@ export const appRouter = router({
     }),
 
     onlineStats: publicProcedure.query(() => {
+      const tableStates = gameManager.getAllTableStates();
+      let totalPlayers = 0;
+      let totalBots = 0;
+      let totalHumans = 0;
+      for (const t of tableStates) {
+        totalPlayers += t.playerCount;
+        totalBots += t.botCount;
+        totalHumans += t.humanCount;
+      }
       return {
         activeTables: gameManager.getActiveTableCount(),
-        onlinePlayers: gameManager.getOnlinePlayerCount(),
+        onlinePlayers: totalPlayers,
+        onlineHumans: totalHumans,
+        onlineBots: totalBots,
+        tableDetails: tableStates.map((t: any) => ({
+          tableId: t.tableId,
+          players: t.playerCount,
+          bots: t.botCount,
+          humans: t.humanCount,
+          phase: t.phase,
+        })),
       };
     }),
   }),
@@ -550,6 +568,314 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
       return db.select().from(handHistory).orderBy(desc(handHistory.playedAt)).limit(input.limit);
+    }),
+
+    // ─── Tournament Management (Admin) ───────────────────
+    tournamentList: adminProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      return db.select().from(tournaments).orderBy(desc(tournaments.createdAt));
+    }),
+
+    createTournament: adminProcedure.input(z.object({
+      name: z.string().min(2).max(256),
+      type: z.enum(["sit_and_go", "mtt", "freeroll"]).default("sit_and_go"),
+      buyIn: z.number().min(0).default(0),
+      entryFee: z.number().min(0).default(0),
+      startingChips: z.number().min(100).default(1500),
+      maxPlayers: z.number().min(2).max(1000).default(9),
+      minPlayers: z.number().min(2).default(2),
+      tableSize: z.enum(["2", "4", "6", "9"]).default("6"),
+      guaranteedPrize: z.number().min(0).default(0),
+      botsEnabled: z.boolean().default(true),
+      botCount: z.number().min(0).max(100).default(3),
+      botDifficulty: z.enum(["beginner", "medium", "pro", "mixed"]).default("mixed"),
+      scheduledStart: z.string().optional(),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const defaultBlinds = [
+        { level: 1, smallBlind: 10, bigBlind: 20, duration: 600 },
+        { level: 2, smallBlind: 15, bigBlind: 30, duration: 600 },
+        { level: 3, smallBlind: 25, bigBlind: 50, duration: 600 },
+        { level: 4, smallBlind: 50, bigBlind: 100, duration: 600 },
+        { level: 5, smallBlind: 75, bigBlind: 150, duration: 600 },
+        { level: 6, smallBlind: 100, bigBlind: 200, duration: 600 },
+        { level: 7, smallBlind: 150, bigBlind: 300, duration: 600 },
+        { level: 8, smallBlind: 200, bigBlind: 400, duration: 600 },
+        { level: 9, smallBlind: 300, bigBlind: 600, duration: 600 },
+        { level: 10, smallBlind: 500, bigBlind: 1000, duration: 600 },
+      ];
+
+      const defaultPayouts = [
+        { place: 1, percentage: 50 },
+        { place: 2, percentage: 30 },
+        { place: 3, percentage: 20 },
+      ];
+
+      const [result] = await db.insert(tournaments).values({
+        name: input.name,
+        type: input.type,
+        buyIn: input.buyIn,
+        entryFee: input.entryFee,
+        startingChips: input.startingChips,
+        maxPlayers: input.maxPlayers,
+        minPlayers: input.minPlayers,
+        tableSize: input.tableSize,
+        guaranteedPrize: input.guaranteedPrize,
+        botsEnabled: input.botsEnabled,
+        botCount: input.botCount,
+        botDifficulty: input.botDifficulty,
+        blindStructure: defaultBlinds,
+        payoutStructure: defaultPayouts,
+        scheduledStart: input.scheduledStart ? new Date(input.scheduledStart) : null,
+        createdBy: ctx.user.id,
+      });
+
+      await db.insert(adminLogs).values({
+        adminId: ctx.user.id,
+        action: "create_tournament",
+        details: { ...input, tournamentId: result.insertId },
+      });
+
+      return { success: true, tournamentId: result.insertId };
+    }),
+
+    updateTournament: adminProcedure.input(z.object({
+      id: z.number(),
+      name: z.string().optional(),
+      status: z.enum(["registering", "running", "paused", "completed", "cancelled"]).optional(),
+      botCount: z.number().optional(),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const { id, ...updateData } = input;
+      const filtered = Object.fromEntries(Object.entries(updateData).filter(([, v]) => v !== undefined));
+      if (Object.keys(filtered).length > 0) {
+        await db.update(tournaments).set(filtered).where(eq(tournaments.id, id));
+      }
+      await db.insert(adminLogs).values({
+        adminId: ctx.user.id,
+        action: "update_tournament",
+        details: input,
+      });
+      return { success: true };
+    }),
+
+    deleteTournament: adminProcedure.input(z.object({
+      id: z.number(),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      await db.delete(tournamentEntries).where(eq(tournamentEntries.tournamentId, input.id));
+      await db.delete(tournaments).where(eq(tournaments.id, input.id));
+      await db.insert(adminLogs).values({
+        adminId: ctx.user.id,
+        action: "delete_tournament",
+        details: { tournamentId: input.id },
+      });
+      return { success: true };
+    }),
+
+    addBotsToTournament: adminProcedure.input(z.object({
+      tournamentId: z.number(),
+      count: z.number().min(1).max(50).default(3),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const [tournament] = await db.select().from(tournaments).where(eq(tournaments.id, input.tournamentId));
+      if (!tournament) throw new Error("Tournament not found");
+
+      const existingEntries = await db.select().from(tournamentEntries).where(eq(tournamentEntries.tournamentId, input.tournamentId));
+      const spotsLeft = tournament.maxPlayers - existingEntries.length;
+      const toAdd = Math.min(input.count, spotsLeft);
+
+      const botNames = ["AlphaBot", "PokerMind", "ChipKing", "BluffMaster", "CardShark", "AceHunter", "StackAttack", "FoldMaster", "RiverRat", "NutCrusher", "PotBuilder", "BetBoss", "RaiseMaster", "CheckRaise", "SlowPlay", "FastFold", "TiltKing", "GrindBot", "ValueBet", "OverBet"];
+      const botAvatars = ["fox", "shark", "owl", "cat", "bear", "monkey", "wolf", "penguin"];
+      const difficulties: ("beginner" | "medium" | "pro")[] = ["beginner", "medium", "pro"];
+
+      for (let i = 0; i < toAdd; i++) {
+        const name = botNames[Math.floor(Math.random() * botNames.length)] + Math.floor(Math.random() * 100);
+        const diff = tournament.botDifficulty === "mixed" ? difficulties[Math.floor(Math.random() * 3)] : tournament.botDifficulty as any;
+        await db.insert(tournamentEntries).values({
+          tournamentId: input.tournamentId,
+          isBot: true,
+          botName: name,
+          botAvatar: botAvatars[Math.floor(Math.random() * botAvatars.length)],
+          botDifficulty: diff,
+          chipStack: tournament.startingChips,
+          status: "registered",
+        });
+      }
+
+      await db.update(tournaments).set({
+        currentPlayers: sql`currentPlayers + ${toAdd}`,
+      }).where(eq(tournaments.id, input.tournamentId));
+
+      return { success: true, added: toAdd };
+    }),
+
+    tournamentEntries: adminProcedure.input(z.object({
+      tournamentId: z.number(),
+    })).query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      return db.select().from(tournamentEntries).where(eq(tournamentEntries.tournamentId, input.tournamentId));
+    }),
+
+    startTournament: adminProcedure.input(z.object({
+      tournamentId: z.number(),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const [tournament] = await db.select().from(tournaments).where(eq(tournaments.id, input.tournamentId));
+      if (!tournament) throw new Error("Tournament not found");
+      if (tournament.status !== "registering") throw new Error("Tournament is not in registering state");
+
+      const entries = await db.select().from(tournamentEntries).where(eq(tournamentEntries.tournamentId, input.tournamentId));
+      if (entries.length < tournament.minPlayers) throw new Error(`Need at least ${tournament.minPlayers} players`);
+
+      // Calculate prize pool
+      const humanEntries = entries.filter(e => !e.isBot);
+      const prizePool = Math.max(humanEntries.length * tournament.buyIn, tournament.guaranteedPrize);
+
+      await db.update(tournaments).set({
+        status: "running",
+        startedAt: new Date(),
+        prizePool,
+      }).where(eq(tournaments.id, input.tournamentId));
+
+      // Set all entries to playing
+      await db.update(tournamentEntries).set({
+        status: "playing",
+        chipStack: tournament.startingChips,
+      }).where(eq(tournamentEntries.tournamentId, input.tournamentId));
+
+      await db.insert(adminLogs).values({
+        adminId: ctx.user.id,
+        action: "start_tournament",
+        details: { tournamentId: input.tournamentId, players: entries.length, prizePool },
+      });
+
+      return { success: true, players: entries.length, prizePool };
+    }),
+  }),
+
+  // ─── Tournaments (Public) ───────────────────────────────
+  tournaments: router({
+    list: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      return db.select().from(tournaments).orderBy(desc(tournaments.createdAt));
+    }),
+
+    get: publicProcedure.input(z.object({
+      id: z.number(),
+    })).query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const [tournament] = await db.select().from(tournaments).where(eq(tournaments.id, input.id));
+      if (!tournament) throw new Error("Tournament not found");
+      const entries = await db.select().from(tournamentEntries).where(eq(tournamentEntries.tournamentId, input.id));
+      return { ...tournament, entries };
+    }),
+
+    register: protectedProcedure.input(z.object({
+      tournamentId: z.number(),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const [tournament] = await db.select().from(tournaments).where(eq(tournaments.id, input.tournamentId));
+      if (!tournament) throw new Error("Tournament not found");
+      if (tournament.status !== "registering") throw new Error("Registration closed");
+      if (tournament.currentPlayers >= tournament.maxPlayers) throw new Error("Tournament full");
+
+      // Check if already registered
+      const existing = await db.select().from(tournamentEntries)
+        .where(and(
+          eq(tournamentEntries.tournamentId, input.tournamentId),
+          eq(tournamentEntries.userId, ctx.user.id)
+        ));
+      if (existing.length > 0) throw new Error("Already registered");
+
+      // Deduct buy-in
+      if (tournament.buyIn > 0) {
+        const [user] = await db.select().from(users).where(eq(users.id, ctx.user.id));
+        if (user.balanceReal < tournament.buyIn + tournament.entryFee) throw new Error("Insufficient balance");
+        await db.update(users).set({
+          balanceReal: sql`balanceReal - ${tournament.buyIn + tournament.entryFee}`,
+        }).where(eq(users.id, ctx.user.id));
+
+        await db.insert(transactions).values({
+          userId: ctx.user.id,
+          type: "buy_in",
+          amount: -(tournament.buyIn + tournament.entryFee),
+          status: "completed",
+          note: `Tournament buy-in: ${tournament.name}`,
+        });
+      }
+
+      await db.insert(tournamentEntries).values({
+        tournamentId: input.tournamentId,
+        userId: ctx.user.id,
+        chipStack: tournament.startingChips,
+        status: "registered",
+      });
+
+      await db.update(tournaments).set({
+        currentPlayers: sql`currentPlayers + 1`,
+      }).where(eq(tournaments.id, input.tournamentId));
+
+      return { success: true };
+    }),
+
+    unregister: protectedProcedure.input(z.object({
+      tournamentId: z.number(),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const [tournament] = await db.select().from(tournaments).where(eq(tournaments.id, input.tournamentId));
+      if (!tournament) throw new Error("Tournament not found");
+      if (tournament.status !== "registering") throw new Error("Cannot unregister after tournament started");
+
+      const existing = await db.select().from(tournamentEntries)
+        .where(and(
+          eq(tournamentEntries.tournamentId, input.tournamentId),
+          eq(tournamentEntries.userId, ctx.user.id)
+        ));
+      if (existing.length === 0) throw new Error("Not registered");
+
+      // Refund buy-in
+      if (tournament.buyIn > 0) {
+        await db.update(users).set({
+          balanceReal: sql`balanceReal + ${tournament.buyIn + tournament.entryFee}`,
+        }).where(eq(users.id, ctx.user.id));
+
+        await db.insert(transactions).values({
+          userId: ctx.user.id,
+          type: "cash_out",
+          amount: tournament.buyIn + tournament.entryFee,
+          status: "completed",
+          note: `Tournament unregister refund: ${tournament.name}`,
+        });
+      }
+
+      await db.delete(tournamentEntries)
+        .where(and(
+          eq(tournamentEntries.tournamentId, input.tournamentId),
+          eq(tournamentEntries.userId, ctx.user.id)
+        ));
+
+      await db.update(tournaments).set({
+        currentPlayers: sql`currentPlayers - 1`,
+      }).where(eq(tournaments.id, input.tournamentId));
+
+      return { success: true };
     }),
   }),
 });

@@ -151,6 +151,62 @@ export const botConfigs = mysqlTable("botConfigs", {
 
 export type BotConfig = typeof botConfigs.$inferSelect;
 
+// ─── Tournaments ────────────────────────────────────────
+export const tournaments = mysqlTable("tournaments", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 256 }).notNull(),
+  type: mysqlEnum("type", ["sit_and_go", "mtt", "freeroll"]).default("sit_and_go").notNull(),
+  status: mysqlEnum("status", ["registering", "running", "paused", "completed", "cancelled"]).default("registering").notNull(),
+  buyIn: int("buyIn").default(0).notNull(), // 0 = freeroll
+  entryFee: int("entryFee").default(0).notNull(), // rake on buy-in
+  startingChips: int("startingChips").default(1500).notNull(),
+  maxPlayers: int("maxPlayers").default(9).notNull(),
+  minPlayers: int("minPlayers").default(2).notNull(),
+  currentPlayers: int("currentPlayers").default(0).notNull(),
+  tableSize: mysqlEnum("tableSize", ["2", "4", "6", "9"]).default("6").notNull(),
+  // Blind structure as JSON: [{level, smallBlind, bigBlind, duration}]
+  blindStructure: json("blindStructure").notNull(),
+  currentBlindLevel: int("currentBlindLevel").default(0).notNull(),
+  // Prize pool
+  prizePool: int("prizePool").default(0).notNull(),
+  guaranteedPrize: int("guaranteedPrize").default(0).notNull(),
+  // Payout structure as JSON: [{place, percentage}]
+  payoutStructure: json("payoutStructure"),
+  // Bot config
+  botsEnabled: boolean("botsEnabled").default(true).notNull(),
+  botCount: int("botCount").default(3).notNull(),
+  botDifficulty: mysqlEnum("botDifficulty", ["beginner", "medium", "pro", "mixed"]).default("mixed").notNull(),
+  // Timing
+  scheduledStart: timestamp("scheduledStart"),
+  startedAt: timestamp("startedAt"),
+  endedAt: timestamp("endedAt"),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Tournament = typeof tournaments.$inferSelect;
+export type InsertTournament = typeof tournaments.$inferInsert;
+
+// ─── Tournament Entries ─────────────────────────────────
+export const tournamentEntries = mysqlTable("tournamentEntries", {
+  id: int("id").autoincrement().primaryKey(),
+  tournamentId: int("tournamentId").notNull(),
+  userId: int("userId"),
+  isBot: boolean("isBot").default(false).notNull(),
+  botName: varchar("botName", { length: 64 }),
+  botAvatar: varchar("botAvatar", { length: 512 }),
+  botDifficulty: mysqlEnum("botDifficulty", ["beginner", "medium", "pro"]),
+  chipStack: int("chipStack").default(0).notNull(),
+  status: mysqlEnum("status", ["registered", "playing", "eliminated", "finished"]).default("registered").notNull(),
+  finishPosition: int("finishPosition"),
+  prizeWon: int("prizeWon").default(0).notNull(),
+  eliminatedAt: timestamp("eliminatedAt"),
+  registeredAt: timestamp("registeredAt").defaultNow().notNull(),
+});
+
+export type TournamentEntry = typeof tournamentEntries.$inferSelect;
+
 // ─── Rake Ledger ────────────────────────────────────────
 export const rakeLedger = mysqlTable("rakeLedger", {
   id: int("id").autoincrement().primaryKey(),

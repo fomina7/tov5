@@ -8,13 +8,14 @@ import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Users, CreditCard, Table2, History, Shield,
   ArrowLeft, Plus, Minus, Eye, RefreshCw, Bot, BarChart3,
-  ScrollText, Trash2, DollarSign, Activity, Gamepad2, UserCog
+  ScrollText, Trash2, DollarSign, Activity, Gamepad2, UserCog,
+  Trophy, Play, Pause, X, UserPlus
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { toast } from 'sonner';
 
-type Tab = 'dashboard' | 'tables' | 'bots' | 'users' | 'transactions' | 'rake' | 'history' | 'logs';
+type Tab = 'dashboard' | 'tables' | 'bots' | 'users' | 'transactions' | 'rake' | 'history' | 'logs' | 'tournaments';
 
 const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -25,6 +26,7 @@ const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'rake', label: 'Rake', icon: BarChart3 },
   { id: 'history', label: 'History', icon: History },
   { id: 'logs', label: 'Logs', icon: Shield },
+  { id: 'tournaments', label: 'Tournaments', icon: Trophy },
 ];
 
 export default function Admin() {
@@ -106,6 +108,7 @@ export default function Admin() {
         {tab === 'rake' && <RakeTab />}
         {tab === 'history' && <HistoryTab />}
         {tab === 'logs' && <LogsTab />}
+        {tab === 'tournaments' && <TournamentsAdminTab />}
       </div>
     </div>
   );
@@ -752,6 +755,318 @@ function LogsTab() {
           </div>
         ))}
         {(!logs || logs.length === 0) && <div className="text-center py-8 text-gray-500 text-sm">No admin logs yet</div>}
+      </div>
+    </div>
+  );
+}
+
+
+// ─── Tournaments Admin ──────────────────────────────────
+function TournamentsAdminTab() {
+  const { data: tournamentList, refetch } = trpc.admin.tournamentList.useQuery();
+  const [showCreate, setShowCreate] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    type: 'sit_and_go' as 'sit_and_go' | 'mtt' | 'freeroll',
+    buyIn: 0,
+    entryFee: 0,
+    startingChips: 1500,
+    maxPlayers: 9,
+    minPlayers: 2,
+    tableSize: '6' as '2' | '4' | '6' | '9',
+    guaranteedPrize: 0,
+    botsEnabled: true,
+    botCount: 3,
+    botDifficulty: 'mixed' as 'beginner' | 'medium' | 'pro' | 'mixed',
+    scheduledStart: '',
+  });
+
+  const createMut = trpc.admin.createTournament.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Tournament created (ID: ${data.tournamentId})`);
+      setShowCreate(false);
+      setFormData({ ...formData, name: '' });
+      refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const deleteMut = trpc.admin.deleteTournament.useMutation({
+    onSuccess: () => { toast.success('Tournament deleted'); refetch(); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const updateMut = trpc.admin.updateTournament.useMutation({
+    onSuccess: () => { toast.success('Tournament updated'); refetch(); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const addBotsMut = trpc.admin.addBotsToTournament.useMutation({
+    onSuccess: (data) => { toast.success(`${data.added} bots added`); refetch(); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const startMut = trpc.admin.startTournament.useMutation({
+    onSuccess: (data) => { toast.success(`Tournament started! ${data.players} players, prize pool: ${data.prizePool}`); refetch(); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const inputClass = "w-full px-3 py-2 rounded-lg text-sm bg-black/40 border border-white/10 text-white focus:border-gold/50 focus:outline-none";
+  const labelClass = "text-[11px] text-gray-400 uppercase tracking-wider mb-1 block";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-white">Tournament Management</h2>
+        <div className="flex gap-2">
+          <button onClick={() => refetch()} className="p-2 rounded-lg" style={glassCard}>
+            <RefreshCw size={14} className="text-gray-400" />
+          </button>
+          <button onClick={() => setShowCreate(!showCreate)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold btn-primary-poker">
+            <Plus size={12} /> Create
+          </button>
+        </div>
+      </div>
+
+      {/* Create form */}
+      {showCreate && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-xl p-4 space-y-3"
+          style={{ ...glassCard, border: '1px solid rgba(212,175,55,0.2)' }}
+        >
+          <h3 className="text-sm font-bold gold-text">Create Tournament</h3>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className={labelClass}>Name</label>
+              <input type="text" placeholder="Tournament name" value={formData.name}
+                onChange={e => setFormData({ ...formData, name: e.target.value })} className={inputClass} />
+            </div>
+
+            <div>
+              <label className={labelClass}>Type</label>
+              <select value={formData.type} onChange={e => setFormData({ ...formData, type: e.target.value as any })}
+                className={inputClass}>
+                <option value="sit_and_go">Sit & Go</option>
+                <option value="mtt">MTT</option>
+                <option value="freeroll">Freeroll</option>
+              </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>Table Size</label>
+              <select value={formData.tableSize} onChange={e => setFormData({ ...formData, tableSize: e.target.value as any })}
+                className={inputClass}>
+                <option value="2">Heads Up (2)</option>
+                <option value="4">Short (4)</option>
+                <option value="6">6-Max</option>
+                <option value="9">Full Ring (9)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>Buy-in</label>
+              <input type="number" value={formData.buyIn} onChange={e => setFormData({ ...formData, buyIn: Number(e.target.value) })}
+                className={inputClass} />
+            </div>
+
+            <div>
+              <label className={labelClass}>Entry Fee (Rake)</label>
+              <input type="number" value={formData.entryFee} onChange={e => setFormData({ ...formData, entryFee: Number(e.target.value) })}
+                className={inputClass} />
+            </div>
+
+            <div>
+              <label className={labelClass}>Starting Chips</label>
+              <input type="number" value={formData.startingChips} onChange={e => setFormData({ ...formData, startingChips: Number(e.target.value) })}
+                className={inputClass} />
+            </div>
+
+            <div>
+              <label className={labelClass}>Guaranteed Prize</label>
+              <input type="number" value={formData.guaranteedPrize} onChange={e => setFormData({ ...formData, guaranteedPrize: Number(e.target.value) })}
+                className={inputClass} />
+            </div>
+
+            <div>
+              <label className={labelClass}>Max Players</label>
+              <input type="number" value={formData.maxPlayers} onChange={e => setFormData({ ...formData, maxPlayers: Number(e.target.value) })}
+                className={inputClass} />
+            </div>
+
+            <div>
+              <label className={labelClass}>Min Players</label>
+              <input type="number" value={formData.minPlayers} onChange={e => setFormData({ ...formData, minPlayers: Number(e.target.value) })}
+                className={inputClass} />
+            </div>
+
+            <div>
+              <label className={labelClass}>Bot Count</label>
+              <input type="number" value={formData.botCount} onChange={e => setFormData({ ...formData, botCount: Number(e.target.value) })}
+                className={inputClass} />
+            </div>
+
+            <div>
+              <label className={labelClass}>Bot Difficulty</label>
+              <select value={formData.botDifficulty} onChange={e => setFormData({ ...formData, botDifficulty: e.target.value as any })}
+                className={inputClass}>
+                <option value="mixed">Mixed</option>
+                <option value="beginner">Beginner</option>
+                <option value="medium">Medium</option>
+                <option value="pro">Pro</option>
+              </select>
+            </div>
+
+            <div className="col-span-2">
+              <label className={labelClass}>Scheduled Start (optional)</label>
+              <input type="datetime-local" value={formData.scheduledStart}
+                onChange={e => setFormData({ ...formData, scheduledStart: e.target.value })}
+                className={inputClass} />
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={() => createMut.mutate(formData)}
+              disabled={createMut.isPending || !formData.name}
+              className="flex-1 py-2.5 rounded-lg text-sm font-bold btn-primary-poker disabled:opacity-50"
+            >
+              {createMut.isPending ? 'Creating...' : 'Create Tournament'}
+            </button>
+            <button onClick={() => setShowCreate(false)} className="px-4 py-2.5 rounded-lg text-sm text-gray-400 border border-white/10">
+              Cancel
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Tournament list */}
+      <div className="space-y-3">
+        {tournamentList?.map(t => (
+          <motion.div
+            key={t.id}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="rounded-xl p-4"
+            style={glassCard}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <div className="text-sm font-bold text-white flex items-center gap-2">
+                  <Trophy size={14} className="text-gold" />
+                  {t.name}
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 uppercase">
+                    {t.type === 'sit_and_go' ? 'SNG' : t.type === 'mtt' ? 'MTT' : 'FREE'}
+                  </span>
+                </div>
+                <div className="text-[10px] text-gray-500 mt-0.5">
+                  ID: {t.id} · Created: {new Date(t.createdAt).toLocaleString()}
+                </div>
+              </div>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                t.status === 'registering' ? 'bg-green-900/30 text-green-400 border border-green-700/30' :
+                t.status === 'running' ? 'bg-orange-900/30 text-orange-400 border border-orange-700/30' :
+                t.status === 'completed' ? 'bg-gray-700/30 text-gray-400 border border-gray-600/30' :
+                t.status === 'cancelled' ? 'bg-red-900/30 text-red-400 border border-red-700/30' :
+                'bg-yellow-900/30 text-yellow-400 border border-yellow-700/30'
+              }`}>
+                {t.status}
+              </span>
+            </div>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              {[
+                { label: 'Players', value: `${t.currentPlayers}/${t.maxPlayers}` },
+                { label: 'Buy-in', value: t.buyIn === 0 ? 'FREE' : t.buyIn.toLocaleString() },
+                { label: 'Prize', value: Math.max(t.prizePool, t.guaranteedPrize).toLocaleString() },
+                { label: 'Chips', value: t.startingChips.toLocaleString() },
+              ].map(s => (
+                <div key={s.label} className="text-center">
+                  <div className="text-[9px] text-gray-500 uppercase">{s.label}</div>
+                  <div className="text-xs font-bold text-white" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                    {s.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap gap-2">
+              {t.status === 'registering' && (
+                <>
+                  <button
+                    onClick={() => addBotsMut.mutate({ tournamentId: t.id, count: 3 })}
+                    disabled={addBotsMut.isPending}
+                    className="text-[10px] px-2.5 py-1.5 rounded-lg bg-blue-900/30 text-blue-400 border border-blue-700/30 flex items-center gap-1"
+                  >
+                    <UserPlus size={10} /> +3 Bots
+                  </button>
+                  <button
+                    onClick={() => addBotsMut.mutate({ tournamentId: t.id, count: 5 })}
+                    disabled={addBotsMut.isPending}
+                    className="text-[10px] px-2.5 py-1.5 rounded-lg bg-blue-900/30 text-blue-400 border border-blue-700/30 flex items-center gap-1"
+                  >
+                    <UserPlus size={10} /> +5 Bots
+                  </button>
+                  <button
+                    onClick={() => startMut.mutate({ tournamentId: t.id })}
+                    disabled={startMut.isPending}
+                    className="text-[10px] px-2.5 py-1.5 rounded-lg bg-green-900/30 text-green-400 border border-green-700/30 flex items-center gap-1"
+                  >
+                    <Play size={10} /> Start
+                  </button>
+                </>
+              )}
+              {t.status === 'running' && (
+                <button
+                  onClick={() => updateMut.mutate({ id: t.id, status: 'paused' })}
+                  className="text-[10px] px-2.5 py-1.5 rounded-lg bg-yellow-900/30 text-yellow-400 border border-yellow-700/30 flex items-center gap-1"
+                >
+                  <Pause size={10} /> Pause
+                </button>
+              )}
+              {t.status === 'paused' && (
+                <button
+                  onClick={() => updateMut.mutate({ id: t.id, status: 'running' })}
+                  className="text-[10px] px-2.5 py-1.5 rounded-lg bg-green-900/30 text-green-400 border border-green-700/30 flex items-center gap-1"
+                >
+                  <Play size={10} /> Resume
+                </button>
+              )}
+              {(t.status === 'registering' || t.status === 'paused') && (
+                <button
+                  onClick={() => updateMut.mutate({ id: t.id, status: 'cancelled' })}
+                  className="text-[10px] px-2.5 py-1.5 rounded-lg bg-orange-900/30 text-orange-400 border border-orange-700/30 flex items-center gap-1"
+                >
+                  <X size={10} /> Cancel
+                </button>
+              )}
+              {(t.status === 'registering' || t.status === 'cancelled') && (
+                <button
+                  onClick={() => {
+                    if (confirm(`Delete tournament "${t.name}"?`)) {
+                      deleteMut.mutate({ id: t.id });
+                    }
+                  }}
+                  className="text-[10px] px-2.5 py-1.5 rounded-lg bg-red-900/30 text-red-400 border border-red-700/30 flex items-center gap-1"
+                >
+                  <Trash2 size={10} /> Delete
+                </button>
+              )}
+            </div>
+          </motion.div>
+        ))}
+
+        {(!tournamentList || tournamentList.length === 0) && (
+          <div className="text-center py-12">
+            <Trophy size={40} className="text-gray-600 mx-auto mb-3" />
+            <p className="text-gray-400 text-sm">No tournaments yet</p>
+            <p className="text-gray-500 text-xs mt-1">Click "Create" to add your first tournament</p>
+          </div>
+        )}
       </div>
     </div>
   );

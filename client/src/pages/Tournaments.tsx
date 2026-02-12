@@ -1,132 +1,114 @@
 /*
- * Tournaments — Cyber Noir Casino theme
+ * Tournaments — Real data from DB
  * Tournament listing and registration
  */
+import { trpc } from '@/lib/trpc';
+import { useAuth } from '@/_core/hooks/useAuth';
 import { motion } from 'framer-motion';
-import { Clock, Users, Trophy, Zap, Crown, Timer, Star, Flame } from 'lucide-react';
-import { ASSETS } from '@/lib/assets';
+import { Clock, Users, Trophy, Zap, Crown, Timer, Star, ChevronLeft, Loader2 } from 'lucide-react';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
+import { useLocation } from 'wouter';
 
-const TOURNAMENTS = [
-  {
-    id: 't1', name: 'Freeroll Friday', buyIn: 0, prize: '10,000',
-    players: '45/100', starts: '15 min', status: 'registering',
-    tier: 'free', icon: Zap,
-  },
-  {
-    id: 't2', name: 'Silver Showdown', buyIn: 500, prize: '25,000',
-    players: '28/50', starts: '1h 30m', status: 'registering',
-    tier: 'silver', icon: Star,
-  },
-  {
-    id: 't3', name: 'Gold Rush', buyIn: 2500, prize: '100,000',
-    players: '12/30', starts: '3h', status: 'registering',
-    tier: 'gold', icon: Crown,
-  },
-  {
-    id: 't4', name: 'Diamond Championship', buyIn: 10000, prize: '500,000',
-    players: '8/20', starts: 'Tomorrow', status: 'upcoming',
-    tier: 'diamond', icon: Crown,
-  },
-  {
-    id: 't5', name: 'Turbo Sprint', buyIn: 100, prize: '5,000',
-    players: '50/50', starts: 'In Progress', status: 'running',
-    tier: 'turbo', icon: Timer,
-  },
-];
-
-const TIER_COLORS: Record<string, string> = {
-  free: 'from-green-950/30 to-green-900/10 border-green-600/25',
-  silver: 'from-gray-800/30 to-gray-700/10 border-gray-500/25',
-  gold: 'from-yellow-950/30 to-yellow-900/10 border-yellow-600/25',
-  diamond: 'from-cyan-950/30 to-cyan-900/10 border-cyan-500/25',
-  turbo: 'from-orange-950/30 to-orange-900/10 border-orange-500/25',
+const STATUS_STYLES: Record<string, { bg: string; border: string; text: string }> = {
+  registering: { bg: 'rgba(0, 200, 0, 0.1)', border: 'rgba(0, 200, 0, 0.2)', text: 'text-green-400' },
+  running: { bg: 'rgba(255, 150, 0, 0.1)', border: 'rgba(255, 150, 0, 0.2)', text: 'text-orange-400' },
+  paused: { bg: 'rgba(255, 255, 0, 0.1)', border: 'rgba(255, 255, 0, 0.2)', text: 'text-yellow-400' },
+  completed: { bg: 'rgba(150, 150, 150, 0.1)', border: 'rgba(150, 150, 150, 0.15)', text: 'text-gray-400' },
+  cancelled: { bg: 'rgba(255, 0, 0, 0.1)', border: 'rgba(255, 0, 0, 0.15)', text: 'text-red-400' },
 };
 
+const TYPE_ICONS: Record<string, typeof Trophy> = {
+  sit_and_go: Zap,
+  mtt: Crown,
+  freeroll: Star,
+};
+
+const TYPE_COLORS: Record<string, string> = {
+  sit_and_go: 'from-blue-950/30 to-blue-900/10 border-blue-600/25',
+  mtt: 'from-yellow-950/30 to-yellow-900/10 border-yellow-600/25',
+  freeroll: 'from-green-950/30 to-green-900/10 border-green-600/25',
+};
+
+function formatChips(amount: number): string {
+  if (amount >= 1000000) return (amount / 1000000).toFixed(1) + 'M';
+  if (amount >= 1000) return (amount / 1000).toFixed(1) + 'K';
+  return amount.toLocaleString();
+}
+
 export default function Tournaments() {
+  const [, navigate] = useLocation();
+  const { user, isAuthenticated } = useAuth();
+  const { data: tournamentList, isLoading, refetch } = trpc.tournaments.list.useQuery();
+
+  const registerMut = trpc.tournaments.register.useMutation({
+    onSuccess: () => {
+      toast.success('Successfully registered!');
+      refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const unregisterMut = trpc.tournaments.unregister.useMutation({
+    onSuccess: () => {
+      toast.success('Unregistered successfully');
+      refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   return (
     <div className="min-h-screen pb-24" style={{
       background: 'radial-gradient(ellipse at top, #0d1117 0%, #080a0f 50%, #050507 100%)',
     }}>
+      {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-xl font-bold gold-text" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-              TOURNAMENTS
-            </h1>
-            <p className="text-xs text-gray-500 mt-0.5">Compete for massive prizes</p>
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate('/')} className="text-gray-400 hover:text-white">
+              <ChevronLeft size={24} />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold gold-text" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                TOURNAMENTS
+              </h1>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {tournamentList?.length || 0} tournaments available
+              </p>
+            </div>
           </div>
-          <motion.img
-            src={ASSETS.ui.trophy}
-            alt=""
-            className="w-10 h-10"
-            animate={{ y: [0, -3, 0], rotate: [0, 3, 0] }}
-            transition={{ duration: 3, repeat: Infinity }}
-          />
+          <Trophy size={28} className="text-gold" />
         </div>
-
-        {/* Featured tournament */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-2xl overflow-hidden mb-5 relative"
-          style={{
-            background: 'linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(139, 0, 0, 0.06) 100%)',
-            border: '1px solid rgba(212, 175, 55, 0.25)',
-          }}
-        >
-          {/* Animated glow */}
-          <motion.div
-            className="absolute -top-8 -right-8 w-24 h-24 rounded-full"
-            style={{ background: 'radial-gradient(circle, rgba(212, 175, 55, 0.1) 0%, transparent 70%)' }}
-            animate={{ scale: [1, 1.4, 1], opacity: [0.3, 0.6, 0.3] }}
-            transition={{ duration: 3, repeat: Infinity }}
-          />
-
-          <div className="p-4 relative z-10">
-            <div className="flex items-center gap-2 mb-2">
-              <Crown size={16} className="text-gold" />
-              <span className="text-xs font-bold text-gold uppercase tracking-wider">Featured</span>
-            </div>
-            <h3 className="text-lg font-bold text-white mb-1">Weekly Championship</h3>
-            <p className="text-xs text-gray-400 mb-3">Sunday 8PM — Top 3 win prizes</p>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div>
-                  <div className="text-[10px] text-gray-500 uppercase">Prize Pool</div>
-                  <div className="text-lg font-bold text-gold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                    1,000,000
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] text-gray-500 uppercase">Buy-in</div>
-                  <div className="text-sm font-bold text-white" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                    5,000
-                  </div>
-                </div>
-              </div>
-              <motion.button
-                onClick={() => toast.success('Registered for Weekly Championship!')}
-                className="btn-primary-poker px-5 py-2 rounded-xl text-sm font-bold"
-                style={{ fontFamily: "'Orbitron', sans-serif" }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                REGISTER
-              </motion.button>
-            </div>
-          </div>
-        </motion.div>
       </div>
 
+      {/* Loading */}
+      {isLoading && (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="animate-spin text-gold" size={32} />
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!isLoading && (!tournamentList || tournamentList.length === 0) && (
+        <div className="flex flex-col items-center justify-center py-20 px-4">
+          <Trophy size={48} className="text-gray-600 mb-4" />
+          <h3 className="text-lg font-bold text-gray-400 mb-2">No Tournaments Yet</h3>
+          <p className="text-sm text-gray-500 text-center">
+            Tournaments will appear here when created by admin.
+            Check back soon!
+          </p>
+        </div>
+      )}
+
       {/* Tournament list */}
-      <div className="px-4">
-        <h2 className="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">Upcoming</h2>
-        <div className="space-y-3">
-          {TOURNAMENTS.map((t, i) => {
-            const Icon = t.icon;
-            const tierClass = TIER_COLORS[t.tier] || TIER_COLORS.free;
+      {tournamentList && tournamentList.length > 0 && (
+        <div className="px-4 space-y-3">
+          {tournamentList.map((t, i) => {
+            const Icon = TYPE_ICONS[t.type] || Trophy;
+            const tierClass = TYPE_COLORS[t.type] || TYPE_COLORS.sit_and_go;
+            const statusStyle = STATUS_STYLES[t.status] || STATUS_STYLES.completed;
+            const prizePool = Math.max(t.prizePool, t.guaranteedPrize);
+
             return (
               <motion.div
                 key={t.id}
@@ -135,55 +117,98 @@ export default function Tournaments() {
                 transition={{ delay: i * 0.08 }}
                 className={`rounded-xl p-4 border bg-gradient-to-r ${tierClass}`}
               >
+                {/* Top row: name + status */}
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <Icon size={16} className="text-gold" />
                     <span className="text-sm font-bold text-white">{t.name}</span>
                   </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                    t.status === 'registering' ? 'text-green-400' :
-                    t.status === 'running' ? 'text-orange-400' :
-                    'text-gray-400'
-                  }`} style={{
-                    background: t.status === 'registering' ? 'rgba(0, 200, 0, 0.1)' :
-                    t.status === 'running' ? 'rgba(255, 150, 0, 0.1)' : 'rgba(150, 150, 150, 0.1)',
-                    border: `1px solid ${t.status === 'registering' ? 'rgba(0, 200, 0, 0.2)' :
-                    t.status === 'running' ? 'rgba(255, 150, 0, 0.2)' : 'rgba(150, 150, 150, 0.15)'}`,
-                  }}>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${statusStyle.text}`}
+                    style={{
+                      background: statusStyle.bg,
+                      border: `1px solid ${statusStyle.border}`,
+                    }}>
                     {t.status}
                   </span>
                 </div>
-                <div className="flex items-center justify-between">
+
+                {/* Info row */}
+                <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-4 text-xs text-gray-400">
                     <span className="flex items-center gap-1">
-                      <Users size={12} /> {t.players}
+                      <Users size={12} /> {t.currentPlayers}/{t.maxPlayers}
                     </span>
                     <span className="flex items-center gap-1">
-                      <Clock size={12} /> {t.starts}
+                      <Timer size={12} /> {t.type === 'sit_and_go' ? 'Sit & Go' : t.type === 'mtt' ? 'MTT' : 'Freeroll'}
                     </span>
+                    {t.scheduledStart && (
+                      <span className="flex items-center gap-1">
+                        <Clock size={12} /> {new Date(t.scheduledStart).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
                   </div>
-                  <div className="text-right">
-                    <div className="text-[10px] text-gray-500">Prize</div>
-                    <div className="text-sm font-bold text-gold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                      {t.prize}
+                </div>
+
+                {/* Prize + Buy-in row */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <div className="text-[10px] text-gray-500 uppercase">Buy-in</div>
+                      <div className="text-sm font-bold text-white" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                        {t.buyIn === 0 ? 'FREE' : formatChips(t.buyIn)}
+                        {t.entryFee > 0 && <span className="text-gray-500"> +{formatChips(t.entryFee)}</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-gray-500 uppercase">Prize Pool</div>
+                      <div className="text-sm font-bold text-gold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                        {prizePool > 0 ? formatChips(prizePool) : t.guaranteedPrize > 0 ? formatChips(t.guaranteedPrize) + ' GTD' : 'TBD'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-gray-500 uppercase">Starting Chips</div>
+                      <div className="text-sm font-bold text-white" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                        {formatChips(t.startingChips)}
+                      </div>
                     </div>
                   </div>
                 </div>
-                {t.status === 'registering' && (
+
+                {/* Action button */}
+                {t.status === 'registering' && isAuthenticated && (
                   <motion.button
-                    onClick={() => toast.success(`Registered for ${t.name}!`)}
-                    className="w-full mt-3 py-2 rounded-lg btn-action-poker text-xs font-bold"
-                    style={{ fontFamily: "'Orbitron', sans-serif" }}
+                    onClick={() => registerMut.mutate({ tournamentId: t.id })}
+                    disabled={registerMut.isPending}
+                    className="w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider"
+                    style={{
+                      fontFamily: "'Orbitron', sans-serif",
+                      background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)',
+                      color: '#000',
+                    }}
                     whileTap={{ scale: 0.98 }}
                   >
-                    {t.buyIn === 0 ? 'JOIN FREE' : `REGISTER — ${t.buyIn.toLocaleString()}`}
+                    {registerMut.isPending ? 'REGISTERING...' : t.buyIn === 0 ? 'JOIN FREE' : `REGISTER — ${formatChips(t.buyIn + t.entryFee)}`}
                   </motion.button>
+                )}
+
+                {t.status === 'running' && (
+                  <div className="w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider text-center text-orange-400"
+                    style={{ background: 'rgba(255, 150, 0, 0.1)', border: '1px solid rgba(255, 150, 0, 0.2)' }}>
+                    IN PROGRESS
+                  </div>
+                )}
+
+                {t.status === 'completed' && (
+                  <div className="w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider text-center text-gray-400"
+                    style={{ background: 'rgba(150, 150, 150, 0.1)', border: '1px solid rgba(150, 150, 150, 0.15)' }}>
+                    COMPLETED
+                  </div>
                 )}
               </motion.div>
             );
           })}
         </div>
-      </div>
+      )}
 
       <BottomNav />
     </div>

@@ -167,3 +167,42 @@
 - [x] Create proper HOUSE POKER logo via AI generation (golden shield with crown)
 - [x] Make all cards clearly visible — community and player cards
 - [x] Ensure buttons not cut off at bottom of screen
+
+## v6 - Major Feature Update
+- [x] Home page: show REAL online stats (active tables, real players, bots count)
+- [x] Admin panel: tournament creation UI (name, buy-in, prize pool, start time, max players)
+- [x] Admin panel: tournament management (start/cancel/view tournaments)
+- [x] Admin panel: add bots to tournaments
+- [x] Tournament system: DB schema (tournaments table, tournament_entries table)
+- [x] Tournament system: tournament engine (blind levels, eliminations, payouts)
+- [x] Tournament system: bot support for tournaments
+- [x] Tournament lobby: list of upcoming/running/completed tournaments
+- [ ] Tournament table: play in tournament with increasing blinds
+- [x] Fix all identified bugs across the project
+- [x] Push everything to GitHub
+
+## v7 - Premium GameTable Redesign (PokerBros style)
+- [x] Dark luxury table with gold accents and "TEXAS HOLD'EM" text
+- [x] Player action status badges (ALL-IN red, FOLD grey, CALL blue, RAISE green)
+- [x] Large action buttons at bottom (FOLD grey, CHECK blue, RAISE green, ALL-IN red)
+- [x] Timer with countdown at top
+- [x] Pot display with trophy icon
+- [x] Gold dealer button
+- [x] Hero cards large at bottom center
+- [ ] Light and dark theme support
+
+## v8 - Visual Polish & Bug Fixes
+- [x] Fix side player positions (moved to 15%/85% from 10%/90%)
+- [x] Fix top player overlap (moved to y=10% from y=6%)
+- [x] Increase player avatar size (w-10 h-10)
+- [x] Increase player name text size (11px)
+- [x] Increase stack text size (12px)
+- [x] Increase player card min-width (90px)
+- [x] Increase face-down card size (sm instead of xs)
+- [x] Increase showdown card size (sm instead of xs)
+- [x] Brighten table border glow
+- [x] Add hero avatar golden glow
+- [x] Increase action badge text size (9px)
+- [x] Verify all pages work correctly (Home, Lobby, Profile, Cashier, Tournaments, Admin)
+- [x] Run tests and fix any failures (43 tests passing)
+- [ ] Save checkpoint and push to GitHub (in progress)

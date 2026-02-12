@@ -115,8 +115,9 @@ class GameManager {
 
   // ─── Join Table ────────────────────────────────────────
   private async handleJoinTable(socket: Socket, data: { tableId: number; userId: number; seatIndex?: number }) {
+    console.log(`[WS] join_table received:`, data);
     const db = await getDb();
-    if (!db) return;
+    if (!db) { console.log('[WS] No DB connection'); return; }
 
     const [tableConfig] = await db.select().from(gameTables).where(eq(gameTables.id, data.tableId));
     if (!tableConfig) {

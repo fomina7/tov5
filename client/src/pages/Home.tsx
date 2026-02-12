@@ -1,6 +1,6 @@
 /**
  * Home — HOUSE POKER Premium Club Landing
- * Ultra-premium dark luxury aesthetic
+ * Shows real online stats: tables, players, bots
  */
 import { useAuth } from '@/_core/hooks/useAuth';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -76,10 +76,22 @@ function CardFan() {
   );
 }
 
+/* ─── Pulsing live dot ─── */
+function LiveDot() {
+  return (
+    <span className="relative flex h-2 w-2">
+      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+    </span>
+  );
+}
+
 export default function Home() {
   const { user, isAuthenticated } = useAuth();
   const [, navigate] = useLocation();
-  const { data: stats } = trpc.tables.onlineStats.useQuery();
+  const { data: stats } = trpc.tables.onlineStats.useQuery(undefined, {
+    refetchInterval: 5000, // refresh every 5 seconds for live feel
+  });
   const [showContent, setShowContent] = useState(false);
 
   useEffect(() => {
@@ -156,24 +168,46 @@ export default function Home() {
           ))}
         </motion.div>
 
-        {/* Stats */}
+        {/* Real Online Stats */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.0, duration: 0.5 }}
-          className="flex gap-3 sm:gap-4 mb-6 sm:mb-8"
+          className="flex flex-wrap justify-center gap-2.5 sm:gap-3 mb-6 sm:mb-8"
         >
-          <div className="glass-card px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-center">
-            <div className="text-base sm:text-lg font-bold text-gold font-mono-poker">
-              {stats?.onlinePlayers ?? 0}
-            </div>
-            <div className="text-[8px] sm:text-[9px] text-gray-500 uppercase tracking-[0.15em] font-medium">Online</div>
-          </div>
-          <div className="glass-card px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-center">
+          {/* Active Tables */}
+          <div className="glass-card px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-center min-w-[70px]">
             <div className="text-base sm:text-lg font-bold text-gold font-mono-poker">
               {stats?.activeTables ?? 0}
             </div>
             <div className="text-[8px] sm:text-[9px] text-gray-500 uppercase tracking-[0.15em] font-medium">Tables</div>
+          </div>
+
+          {/* Total Players */}
+          <div className="glass-card px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-center min-w-[70px]">
+            <div className="flex items-center justify-center gap-1.5">
+              <LiveDot />
+              <span className="text-base sm:text-lg font-bold text-green-400 font-mono-poker">
+                {stats?.onlinePlayers ?? 0}
+              </span>
+            </div>
+            <div className="text-[8px] sm:text-[9px] text-gray-500 uppercase tracking-[0.15em] font-medium">Playing</div>
+          </div>
+
+          {/* Real Players */}
+          <div className="glass-card px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-center min-w-[70px]">
+            <div className="text-base sm:text-lg font-bold text-blue-400 font-mono-poker">
+              {stats?.onlineHumans ?? 0}
+            </div>
+            <div className="text-[8px] sm:text-[9px] text-gray-500 uppercase tracking-[0.15em] font-medium">Players</div>
+          </div>
+
+          {/* Bots */}
+          <div className="glass-card px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-center min-w-[70px]">
+            <div className="text-base sm:text-lg font-bold text-amber-400 font-mono-poker">
+              {stats?.onlineBots ?? 0}
+            </div>
+            <div className="text-[8px] sm:text-[9px] text-gray-500 uppercase tracking-[0.15em] font-medium">Bots</div>
           </div>
         </motion.div>
 
@@ -187,7 +221,6 @@ export default function Home() {
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.97 }}
         >
-          {/* Shimmer overlay */}
           <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-700" />
           <span className="relative">{isAuthenticated ? 'PLAY NOW' : 'ENTER CLUB'}</span>
         </motion.button>
@@ -226,7 +259,7 @@ export default function Home() {
           ))}
         </motion.div>
 
-        <p className="text-[10px] text-gray-700 tracking-wider">v3.0 — Play responsibly</p>
+        <p className="text-[10px] text-gray-700 tracking-wider">v4.0 — Play responsibly</p>
       </div>
     </div>
   );

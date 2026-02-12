@@ -22,6 +22,13 @@
       "when": 1770912445254,
       "tag": "0002_dry_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1770918197113,
+      "tag": "0003_freezing_naoko",
+      "breakpoints": true
     }
   ]
 }

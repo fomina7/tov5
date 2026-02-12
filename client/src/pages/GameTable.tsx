@@ -1,12 +1,12 @@
 /**
- * GameTable — MEGA Premium Poker Table (TON Poker style)
- * AI-generated background + logo, programmatic cards/chips
- * Fixed: positions, buttons visible, white glowing table border
+ * GameTable — Premium Poker Table (PokerBros / PPPoker style)
+ * Dark luxury design with gold accents, large action buttons,
+ * player action badges, countdown timer, "TEXAS HOLD'EM" branding
  */
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useParams } from 'wouter';
-import { ArrowLeft, Clock, Users, Wifi, WifiOff, MessageCircle, Smile } from 'lucide-react';
+import { ArrowLeft, Clock, Users, Wifi, WifiOff, MessageCircle, Smile, Settings } from 'lucide-react';
 import { useSocket, ServerPlayer } from '@/hooks/useSocket';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
@@ -16,36 +16,34 @@ import { toast } from 'sonner';
 import PokerCard from '@/components/PokerCard';
 import { formatChipAmount } from '@/components/PokerChip';
 import TableBackground from '@/components/TableBackground';
-import { HousePokerLogoCompact } from '@/components/HousePokerLogo';
 
-/* ─── Seat positions — pulled inward, nothing cut off ─── */
+/* ─── Seat positions for 6-max (% of table area) ─── */
 const SEATS_6 = [
-  { x: 50, y: 84 },   // 0: hero (bottom center)
-  { x: 12, y: 64 },   // 1: left-bottom
-  { x: 12, y: 26 },   // 2: left-top
-  { x: 50, y: 6 },    // 3: top center
-  { x: 88, y: 26 },   // 4: right-top
-  { x: 88, y: 64 },   // 5: right-bottom
+  { x: 50, y: 86 },   // 0: hero (bottom center)
+  { x: 15, y: 68 },   // 1: left-bottom
+  { x: 15, y: 28 },   // 2: left-top
+  { x: 50, y: 10 },   // 3: top center
+  { x: 85, y: 28 },   // 4: right-top
+  { x: 85, y: 68 },   // 5: right-bottom
 ];
 const SEATS_9 = [
-  { x: 50, y: 88 }, { x: 10, y: 70 }, { x: 8, y: 46 },
-  { x: 10, y: 22 }, { x: 34, y: 6 },  { x: 66, y: 6 },
-  { x: 90, y: 22 }, { x: 92, y: 46 }, { x: 90, y: 70 },
+  { x: 50, y: 86 }, { x: 14, y: 72 }, { x: 12, y: 48 },
+  { x: 14, y: 20 }, { x: 36, y: 6 }, { x: 64, y: 6 },
+  { x: 86, y: 20 }, { x: 88, y: 48 }, { x: 86, y: 72 },
 ];
-const SEATS_2 = [{ x: 50, y: 88 }, { x: 50, y: 6 }];
+const SEATS_2 = [{ x: 50, y: 84 }, { x: 50, y: 8 }];
 
 function getSeats(n: number) {
   return n <= 2 ? SEATS_2 : n <= 6 ? SEATS_6 : SEATS_9;
 }
 
 /* ─── Bet pill positions — closer to center ─── */
-function getBetPos(playerPos: { x: number; y: number }) {
+function getBetPos(px: number, py: number) {
   const cx = 50, cy = 44;
-  const dx = cx - playerPos.x;
-  const dy = cy - playerPos.y;
+  const dx = cx - px, dy = cy - py;
   const dist = Math.sqrt(dx * dx + dy * dy);
-  const factor = Math.min(0.45, 18 / dist);
-  return { x: playerPos.x + dx * factor, y: playerPos.y + dy * factor };
+  const factor = Math.min(0.5, 20 / dist);
+  return { x: px + dx * factor, y: py + dy * factor };
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -53,860 +51,787 @@ const PHASE_LABELS: Record<string, string> = {
   turn: 'TURN', river: 'RIVER', showdown: 'SHOWDOWN',
 };
 
+/* ─── Action status badge colors ─── */
+const ACTION_BADGE: Record<string, { bg: string; text: string; border: string }> = {
+  fold:  { bg: '#374151', text: '#9CA3AF', border: '#4B5563' },
+  call:  { bg: '#1E3A5F', text: '#60A5FA', border: '#2563EB' },
+  check: { bg: '#1E3A5F', text: '#60A5FA', border: '#2563EB' },
+  raise: { bg: '#14532D', text: '#4ADE80', border: '#16A34A' },
+  bet:   { bg: '#14532D', text: '#4ADE80', border: '#16A34A' },
+  allin: { bg: '#7F1D1D', text: '#FCA5A5', border: '#DC2626' },
+  'all-in': { bg: '#7F1D1D', text: '#FCA5A5', border: '#DC2626' },
+};
+
+function getActionBadge(action: string) {
+  const key = action.toLowerCase().replace(/[^a-z-]/g, '');
+  return ACTION_BADGE[key] || ACTION_BADGE.fold;
+}
+
 /* ─── Position Badge (D/SB/BB) ─── */
 function PosBadge({ label, bg }: { label: string; bg: string }) {
   return (
-    <div className="absolute -top-0.5 -right-0.5 z-10 w-[14px] h-[14px] rounded-full flex items-center justify-center text-[6px] font-black text-white"
-      style={{ background: bg, boxShadow: `0 1px 4px rgba(0,0,0,0.5)`, border: '1px solid rgba(255,255,255,0.2)' }}>
+    <div className="absolute -top-1 -right-1 z-20 w-[16px] h-[16px] rounded-full flex items-center justify-center text-[7px] font-black text-white shadow-lg"
+      style={{ background: bg, border: '1.5px solid rgba(255,255,255,0.3)' }}>
       {label}
     </div>
   );
 }
 
-/* ─── Player Seat ─── */
-function SeatView({
-  player, pos, isAction, isDealer, isSB, isBB, isHero, isShowdown, isWinner, timerPct,
-}: {
-  player: ServerPlayer; pos: { x: number; y: number };
-  isAction: boolean; isDealer: boolean; isSB: boolean; isBB: boolean;
-  isHero: boolean; isShowdown: boolean; isWinner: boolean; timerPct: number;
-}) {
-  const avatarUrl = ASSETS.avatars[player.avatar as keyof typeof ASSETS.avatars] || ASSETS.avatars.fox;
-  const isTop = pos.y < 20;
-  const isBottom = pos.y > 75;
-  const isLeft = pos.x < 25;
-  const isRight = pos.x > 75;
-
-  // Card placement: cards go ABOVE for top/left/right players, BELOW for bottom (non-hero)
-  const showCards = !isHero && player.holeCards.length > 0 && !player.folded;
-  const cardsAbove = showCards && (isTop || isLeft || isRight);
-  const cardsBelow = showCards && isBottom;
-
-  return (
-    <motion.div
-      className="absolute flex flex-col items-center"
-      style={{
-        left: `${pos.x}%`, top: `${pos.y}%`,
-        transform: 'translate(-50%, -50%)',
-        zIndex: isAction ? 20 : isHero ? 15 : 10,
-      }}
-      initial={{ scale: 0, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ type: 'spring', stiffness: 200 }}
-    >
-      {/* Cards above player */}
-      {cardsAbove && (
-        <div className="flex gap-0.5 mb-0.5">
-          {player.holeCards.map((c, i) => (
-            <PokerCard key={i} card={c as Card} faceDown={!isShowdown} size="xs" delay={i * 0.05} />
-          ))}
-        </div>
-      )}
-
-      {/* Player container */}
-      <div className={`relative ${player.folded ? 'opacity-30 grayscale' : ''} transition-all duration-300`}>
-        {/* Timer ring */}
-        {isAction && !player.folded && (
-          <svg className="absolute" viewBox="0 0 52 52" style={{ width: '140%', height: '140%', left: '-20%', top: '-20%' }}>
-            <circle cx="26" cy="26" r="23" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="2" />
-            <circle cx="26" cy="26" r="23" fill="none"
-              stroke={timerPct > 0.5 ? '#D4AF37' : timerPct > 0.25 ? '#f59e0b' : '#ef4444'}
-              strokeWidth="2.5"
-              strokeDasharray={`${timerPct * 144.5} 144.5`}
-              strokeLinecap="round"
-              transform="rotate(-90 26 26)"
-              style={{ transition: 'stroke-dasharray 0.5s linear, stroke 0.5s' }}
-            />
-          </svg>
-        )}
-
-        {/* Winner glow */}
-        {isWinner && (
-          <motion.div
-            className="absolute -inset-3 rounded-full"
-            style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.5) 0%, transparent 70%)' }}
-            animate={{ scale: [1, 1.5, 1], opacity: [0.3, 0.8, 0.3] }}
-            transition={{ duration: 1.5, repeat: Infinity }}
-          />
-        )}
-
-        {/* Avatar */}
-        <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden" style={{
-          border: `2px solid ${
-            isWinner ? '#D4AF37'
-            : isAction ? 'rgba(212,175,55,0.8)'
-            : isHero ? 'rgba(212,175,55,0.4)'
-            : 'rgba(255,255,255,0.15)'
-          }`,
-          boxShadow: isWinner
-            ? '0 0 20px rgba(212,175,55,0.6)'
-            : isAction
-            ? '0 0 12px rgba(212,175,55,0.3)'
-            : '0 2px 8px rgba(0,0,0,0.5)',
-        }}>
-          <img src={avatarUrl} alt={player.name} className="w-full h-full object-cover" />
-        </div>
-
-        {/* Dealer button */}
-        {isDealer && <PosBadge label="D" bg="linear-gradient(135deg, #F5E6A3, #B8941F)" />}
-        {isSB && !isDealer && <PosBadge label="S" bg="#3b82f6" />}
-        {isBB && !isDealer && !isSB && <PosBadge label="B" bg="#ef4444" />}
-      </div>
-
-      {/* Name + stack plate */}
-      <div className="mt-0.5 text-center px-2 py-0.5 rounded-md" style={{
-        background: isHero
-          ? 'linear-gradient(135deg, rgba(212,175,55,0.12), rgba(212,175,55,0.04))'
-          : 'rgba(0,0,0,0.85)',
-        border: isHero ? '1px solid rgba(212,175,55,0.2)' : '1px solid rgba(255,255,255,0.06)',
-        minWidth: 50,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-      }}>
-        <div className={`text-[8px] font-semibold truncate max-w-[60px] ${isHero ? 'text-gold-light' : 'text-gray-300'}`}>
-          {isHero ? '★ YOU' : player.name}
-        </div>
-        <div className="text-[9px] font-bold text-gold font-mono-poker">
-          {formatChipAmount(player.chipStack)}
-        </div>
-      </div>
-
-      {/* Last action badge */}
-      {player.lastAction && (
-        <motion.div
-          initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }}
-          className="mt-0.5 px-1.5 py-0.5 rounded-full text-[7px] font-black uppercase tracking-wider"
-          style={{
-            background: player.lastAction.startsWith('WIN')
-              ? 'rgba(212,175,55,0.2)' : player.lastAction === 'FOLD'
-              ? 'rgba(239,68,68,0.2)' : player.lastAction === 'ALL IN'
-              ? 'rgba(255,107,0,0.2)' : 'rgba(255,255,255,0.06)',
-            color: player.lastAction.startsWith('WIN')
-              ? '#D4AF37' : player.lastAction === 'FOLD'
-              ? '#f87171' : player.lastAction === 'ALL IN'
-              ? '#fb923c' : '#94a3b8',
-            border: `1px solid ${player.lastAction.startsWith('WIN') ? 'rgba(212,175,55,0.2)' : 'rgba(255,255,255,0.06)'}`,
-          }}
-        >
-          {player.lastAction}
-        </motion.div>
-      )}
-
-      {/* Cards below player */}
-      {cardsBelow && (
-        <div className="flex gap-0.5 mt-0.5">
-          {player.holeCards.map((c, i) => (
-            <PokerCard key={i} card={c as Card} faceDown={!isShowdown} size="xs" delay={i * 0.05} />
-          ))}
-        </div>
-      )}
-    </motion.div>
-  );
-}
-
-/* ─── Bet Pill ─── */
-function BetPill({ amount, pos }: { amount: number; pos: { x: number; y: number } }) {
-  if (amount <= 0) return null;
-  return (
-    <motion.div
-      initial={{ scale: 0, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      className="absolute z-10 flex items-center gap-1 px-2 py-0.5 rounded-full"
-      style={{
-        left: `${pos.x}%`, top: `${pos.y}%`,
-        transform: 'translate(-50%, -50%)',
-        background: 'linear-gradient(135deg, rgba(212,175,55,0.25), rgba(212,175,55,0.1))',
-        border: '1px solid rgba(212,175,55,0.35)',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-      }}
-    >
-      <svg width="10" height="10" viewBox="0 0 10 10">
-        <circle cx="5" cy="5" r="4.5" fill="#D4AF37" stroke="#B8941F" strokeWidth="0.5" />
-        <circle cx="5" cy="5" r="2.5" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="0.5" />
-      </svg>
-      <span className="text-[9px] font-bold text-gold font-mono-poker">{formatChipAmount(amount)}</span>
-    </motion.div>
-  );
-}
-
-/* ─── Empty Seat ─── */
-function EmptySeat({ pos, seatIndex, onSit }: { pos: { x: number; y: number }; seatIndex: number; onSit: () => void }) {
-  return (
-    <motion.div
-      className="absolute flex flex-col items-center"
-      style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%, -50%)', zIndex: 5 }}
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-    >
-      <button onClick={onSit}
-        className="w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95"
-        style={{
-          background: 'rgba(255,255,255,0.03)',
-          border: '1.5px dashed rgba(255,255,255,0.12)',
-        }}>
-        <span className="text-[8px] font-bold text-gray-500">SIT</span>
-      </button>
-    </motion.div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════
-   MAIN GAME TABLE COMPONENT
-   ═══════════════════════════════════════════════════════ */
-export default function GameTable() {
-  const params = useParams<{ tableId: string }>();
-  const tableId = parseInt(params.tableId || '1');
-  const [, navigate] = useLocation();
-  const { user } = useAuth();
-  const { connected, gameState, mySeatIndex, error, joinTable, leaveTable, sendAction } = useSocket();
-
-  const [turnTimer, setTurnTimer] = useState(30);
-  const [raiseAmount, setRaiseAmount] = useState(0);
-  const [showRaise, setShowRaise] = useState(false);
-  const [preAction, setPreAction] = useState<string | null>(null);
-  const tableRef = useRef<HTMLDivElement>(null);
-
-  const { data: tableConfig } = trpc.tables.get.useQuery({ id: tableId });
-
-  // Join table
+/* ─── Countdown Timer ─── */
+function CountdownTimer({ deadline, serverOffset }: { deadline: number; serverOffset: number }) {
+  const [seconds, setSeconds] = useState(0);
   useEffect(() => {
-    if (connected && user?.id && tableId) joinTable(tableId, user.id);
-    return () => { if (tableId) leaveTable(tableId); };
-  }, [connected, user?.id, tableId]);
-
-  useEffect(() => { if (error) toast.error(error); }, [error]);
-
-  // Timer
-  useEffect(() => {
-    if (!gameState || gameState.phase === 'showdown' || gameState.phase === 'waiting') {
-      setTurnTimer(30); return;
-    }
-    if (!gameState.actionDeadline || gameState.actionDeadline <= 0) return;
     const tick = () => {
-      const remaining = Math.max(0, Math.ceil((gameState.actionDeadline - Date.now()) / 1000));
-      setTurnTimer(remaining);
+      const now = Date.now() - serverOffset;
+      const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+      setSeconds(remaining);
     };
     tick();
-    const interval = setInterval(tick, 500);
-    return () => clearInterval(interval);
-  }, [gameState?.actionSeat, gameState?.phase, gameState?.actionDeadline]);
+    const iv = setInterval(tick, 200);
+    return () => clearInterval(iv);
+  }, [deadline, serverOffset]);
 
-  const heroPlayer = useMemo(() => {
-    if (!gameState) return null;
-    if (mySeatIndex >= 0) {
-      const byIndex = gameState.players.find(p => p.seatIndex === mySeatIndex);
-      if (byIndex) return byIndex;
-    }
-    if (user?.id) return gameState.players.find(p => p.userId === user.id) || null;
-    return null;
-  }, [gameState?.players, mySeatIndex, user?.id]);
+  const isLow = seconds <= 5;
+  return (
+    <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold font-mono-poker ${isLow ? 'text-red-400' : 'text-amber-300'}`}
+      style={{
+        background: isLow ? 'rgba(220,38,38,0.15)' : 'rgba(212,175,55,0.1)',
+        border: `1px solid ${isLow ? 'rgba(220,38,38,0.3)' : 'rgba(212,175,55,0.2)'}`,
+      }}>
+      <Clock size={12} />
+      <span>{seconds}s</span>
+    </div>
+  );
+}
 
-  const heroSeat = heroPlayer?.seatIndex ?? mySeatIndex;
-
-  const isMyTurn = useMemo(() => {
-    if (!gameState || heroSeat < 0) return false;
-    if (gameState.phase === 'showdown' || gameState.phase === 'waiting') return false;
-    return gameState.actionSeat === heroSeat;
-  }, [gameState?.actionSeat, gameState?.phase, heroSeat]);
-
-  const callAmount = heroPlayer
-    ? Math.min(heroPlayer.chipStack, Math.max(0, (gameState?.currentBet ?? 0) - heroPlayer.currentBet))
-    : 0;
-  const canCheck = callAmount === 0;
-
-  // Auto pre-action
-  useEffect(() => {
-    if (!isMyTurn || !preAction || !gameState) return;
-    if (preAction === 'check_fold') {
-      if (canCheck) sendAction(tableId, 'check');
-      else sendAction(tableId, 'fold');
-    } else if (preAction === 'call_any') {
-      if (canCheck) sendAction(tableId, 'check');
-      else sendAction(tableId, 'call');
-    } else if (preAction === 'fold_to_bet') {
-      if (!canCheck) sendAction(tableId, 'fold');
-    }
-    setPreAction(null);
-  }, [isMyTurn, preAction]);
-
-  const minRaise = gameState?.minRaise || 0;
-  const maxRaise = heroPlayer?.chipStack || 0;
-
-  useEffect(() => {
-    if (gameState && heroPlayer) {
-      setRaiseAmount(Math.min(gameState.currentBet + gameState.bigBlind * 2, heroPlayer.chipStack));
-    }
-  }, [gameState?.currentBet, gameState?.bigBlind]);
-
-  const tableSize = tableConfig ? parseInt(tableConfig.tableSize) : 6;
-  const seats = getSeats(tableSize);
-  const timerPct = turnTimer / 30;
-
-  const orderedPlayers = useMemo((): (ServerPlayer & { vi: number })[] => {
-    if (!gameState) return [];
-    const ps = [...gameState.players];
-    if (heroSeat < 0) return ps.map((p, i) => ({ ...p, vi: i }));
-    return ps.map(p => ({
-      ...p,
-      vi: (p.seatIndex - heroSeat + tableSize) % tableSize,
-    })).sort((a, b) => a.vi - b.vi);
-  }, [gameState?.players, heroSeat, tableSize]);
-
-  const potTotal = gameState ? gameState.pots.reduce((s, p) => s + p.amount, 0) : 0;
-  const betsOnTable = gameState ? gameState.players.reduce((s, p) => s + p.currentBet, 0) : 0;
-  const totalPot = potTotal + betsOnTable;
-  const hasMultiplePots = gameState ? gameState.pots.filter(p => p.amount > 0).length > 1 : false;
-
-  const handleAction = useCallback((action: string, amount?: number) => {
-    sendAction(tableId, action, amount);
-    setShowRaise(false);
-    setPreAction(null);
-  }, [tableId, sendAction]);
-
-  const raisePresets = useMemo(() => {
-    if (!gameState || !heroPlayer) return [];
-    const bb = gameState.bigBlind;
-    const pot = totalPot;
-    const minR = Math.max(gameState.currentBet + minRaise, bb);
-    return [
-      { label: 'Min', value: Math.max(minR, gameState.currentBet + bb) },
-      { label: '3BB', value: Math.min(bb * 3 + gameState.currentBet, maxRaise) },
-      { label: '5BB', value: Math.min(bb * 5 + gameState.currentBet, maxRaise) },
-      { label: 'All In', value: maxRaise },
-    ].filter(p => p.value >= minR && p.value <= maxRaise);
-  }, [gameState, heroPlayer, totalPot, minRaise, maxRaise]);
-
-  const occupiedSeats = useMemo(() => {
-    if (!gameState) return new Set<number>();
-    return new Set(gameState.players.map(p => p.seatIndex));
-  }, [gameState?.players]);
-
-  /* ─── Loading State ─── */
-  if (!connected || !gameState) {
+/* ─── Player Card (avatar + name + stack + action badge) ─── */
+function PlayerSeat({
+  player, isHero, isDealer, isSB, isBB, isActive, seatPos, maxSeats,
+  onSit,
+}: {
+  player: ServerPlayer | null;
+  isHero: boolean;
+  isDealer: boolean;
+  isSB: boolean;
+  isBB: boolean;
+  isActive: boolean;
+  seatPos: { x: number; y: number };
+  maxSeats: number;
+  onSit: () => void;
+}) {
+  if (!player) {
+    // Empty seat
     return (
-      <div className="h-[100dvh] flex flex-col items-center justify-center gap-4 relative overflow-hidden">
-        <TableBackground />
-        <div className="relative z-10 flex flex-col items-center gap-4">
-          <motion.div animate={{ rotate: 360 }} transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}>
-            <svg width="48" height="48" viewBox="0 0 48 48">
-              <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(212,175,55,0.2)" strokeWidth="2" />
-              <circle cx="24" cy="24" r="20" fill="none" stroke="#D4AF37" strokeWidth="2"
-                strokeDasharray="40 86" strokeLinecap="round" />
-            </svg>
-          </motion.div>
-          <p className="text-gray-400 text-sm font-medium">{!connected ? 'Connecting...' : 'Joining table...'}</p>
-          {!user && <p className="text-gold/60 text-xs">Please sign in to play</p>}
-          <button onClick={() => navigate('/lobby')} className="text-gray-600 text-xs underline mt-4 hover:text-gray-400">
-            Back to Lobby
-          </button>
-        </div>
+      <div className="absolute flex flex-col items-center" style={{
+        left: `${seatPos.x}%`, top: `${seatPos.y}%`,
+        transform: 'translate(-50%, -50%)',
+      }}>
+        <button
+          onClick={onSit}
+          className="w-12 h-12 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-[10px] font-bold hover:border-gold hover:text-gold transition-colors"
+          style={{ background: 'rgba(0,0,0,0.4)' }}
+        >
+          SIT
+        </button>
       </div>
     );
   }
 
-  /* ─── Main Render ─── */
+  const avatarKey = player.avatar || 'fox';
+  const avatarUrl = ASSETS.avatars[avatarKey as keyof typeof ASSETS.avatars] || ASSETS.avatars.fox;
+  const isLeft = seatPos.x < 30;
+  const isRight = seatPos.x > 70;
+
   return (
-    <div className="h-[100dvh] grid relative overflow-hidden select-none" style={{ gridTemplateRows: 'auto 1fr auto' }}>
-      {/* Atmospheric AI background */}
-      <TableBackground />
-
-      {/* ─── Top HUD ─── */}
-      <div className="relative z-30 flex items-center justify-between px-2 py-1 shrink-0" style={{
-        background: 'linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.2) 80%, transparent 100%)',
-      }}>
-        <div className="flex items-center gap-2">
-          <button onClick={() => { leaveTable(tableId); navigate('/lobby'); }}
-            className="w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90"
-            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
-            <ArrowLeft size={13} className="text-gray-400" />
-          </button>
-          <HousePokerLogoCompact size={24} />
+    <div className="absolute flex flex-col items-center" style={{
+      left: `${seatPos.x}%`, top: `${seatPos.y}%`,
+      transform: 'translate(-50%, -50%)',
+      zIndex: isHero ? 30 : isActive ? 25 : 10,
+    }}>
+      {/* Face-down cards for non-hero players */}
+      {!isHero && !player.folded && player.holeCards.length === 0 && (
+        <div className="flex -mb-1 relative z-0">
+          <div className="transform -rotate-6">
+            <PokerCard card={{ suit: 's', rank: 'A' }} faceDown size="sm" animate={false} />
+          </div>
+          <div className="transform rotate-6 -ml-4">
+            <PokerCard card={{ suit: 's', rank: 'A' }} faceDown size="sm" animate={false} />
+          </div>
         </div>
+      )}
 
-        <div className="flex items-center gap-1.5">
-          <div className="px-2.5 py-0.5 rounded-md text-center" style={{
-            background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.06)',
-          }}>
-            <div className="text-[8px] uppercase tracking-[0.1em] text-gray-500 font-semibold">
-              NLH ~ {gameState.smallBlind}/{gameState.bigBlind} {tableSize}MAX
+      {/* Showdown cards for non-hero */}
+      {!isHero && player.holeCards.length > 0 && (
+        <div className="flex -mb-2 relative z-0 gap-0.5">
+          {player.holeCards.map((c, i) => (
+            <PokerCard key={i} card={c} size="sm" animate delay={i * 0.1} />
+          ))}
+        </div>
+      )}
+
+      {/* Avatar + Info card */}
+      <div className="relative">
+        {/* Active turn glow */}
+        {isActive && (
+          <motion.div
+            className="absolute -inset-1 rounded-xl"
+            style={{ background: 'rgba(212,175,55,0.15)', border: '1.5px solid rgba(212,175,55,0.4)' }}
+            animate={{ opacity: [0.5, 1, 0.5] }}
+            transition={{ duration: 1.5, repeat: Infinity }}
+          />
+        )}
+
+        {/* Info card with avatar */}
+        <div className="relative rounded-lg overflow-hidden" style={{
+          background: isHero
+            ? 'linear-gradient(180deg, rgba(30,30,50,0.95) 0%, rgba(15,15,25,0.98) 100%)'
+            : 'linear-gradient(180deg, rgba(20,20,35,0.9) 0%, rgba(10,10,20,0.95) 100%)',
+          border: isActive ? '1px solid rgba(212,175,55,0.4)' : '1px solid rgba(255,255,255,0.08)',
+          minWidth: '90px',
+        }}>
+          <div className="flex items-center gap-2 px-2 py-1.5">
+            {/* Avatar */}
+            <div className="relative flex-shrink-0">
+              <div className="w-10 h-10 rounded-full overflow-hidden" style={{
+                border: isHero ? '2px solid #D4AF37' : '1.5px solid rgba(255,255,255,0.15)',
+                boxShadow: isHero ? '0 0 10px rgba(212,175,55,0.3)' : 'none',
+              }}>
+                <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+              </div>
+              {/* Position badges */}
+              {isDealer && <PosBadge label="D" bg="#D4AF37" />}
+              {isSB && !isDealer && <PosBadge label="SB" bg="#3B82F6" />}
+              {isBB && !isDealer && <PosBadge label="BB" bg="#EF4444" />}
             </div>
-            <div className="text-[8px] font-bold text-gray-400 font-mono-poker">
-              {PHASE_LABELS[gameState.phase]} #{gameState.handNumber}
+
+            {/* Name + Stack */}
+            <div className="flex flex-col min-w-0">
+              <span className="text-[11px] font-semibold text-gray-200 truncate max-w-[80px] leading-tight">
+                {player.name}
+              </span>
+              <span className="text-[12px] font-bold text-amber-300 font-mono-poker leading-tight flex items-center gap-0.5">
+                <img src={ASSETS.ui.coin} alt="" className="w-3.5 h-3.5" />
+                {formatChipAmount(player.chipStack)}
+              </span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
-          {gameState.phase !== 'showdown' && gameState.phase !== 'waiting' && (
-            <div className={`px-1.5 py-0.5 rounded-md flex items-center gap-1`}
-              style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.06)' }}>
-              <Clock size={9} className={turnTimer <= 10 ? 'text-red-400' : 'text-gray-500'} />
-              <span className={`text-[9px] font-bold font-mono-poker ${turnTimer <= 10 ? 'text-red-400 animate-pulse' : 'text-gray-400'}`}>
-                {turnTimer}s
+        {/* Action badge below card */}
+        {player.lastAction && !player.folded && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.8 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 z-20"
+          >
+            <div className="px-3 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider whitespace-nowrap"
+              style={{
+                background: getActionBadge(player.lastAction).bg,
+                color: getActionBadge(player.lastAction).text,
+                border: `1px solid ${getActionBadge(player.lastAction).border}`,
+              }}>
+              {player.allIn ? 'ALL-IN' : player.lastAction.toUpperCase()}
+              {player.currentBet > 0 && !player.allIn && ` ${formatChipAmount(player.currentBet)}`}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Folded overlay */}
+        {player.folded && (
+          <div className="absolute inset-0 rounded-lg flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.6)' }}>
+            <span className="text-[8px] font-bold text-gray-500 uppercase tracking-wider">FOLD</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Bet Pill ─── */
+function BetPill({ amount, x, y }: { amount: number; x: number; y: number }) {
+  if (amount <= 0) return null;
+  return (
+    <div className="absolute z-15 flex items-center gap-0.5 px-1.5 py-0.5 rounded-full"
+      style={{
+        left: `${x}%`, top: `${y}%`,
+        transform: 'translate(-50%, -50%)',
+        background: 'linear-gradient(135deg, rgba(180,140,40,0.85) 0%, rgba(140,100,20,0.9) 100%)',
+        border: '1px solid rgba(255,220,100,0.3)',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+      }}>
+      <img src={ASSETS.chips.gold} alt="" className="w-3 h-3" />
+      <span className="text-[9px] font-bold text-white font-mono-poker">{formatChipAmount(amount)}</span>
+    </div>
+  );
+}
+
+/* ─── Main GameTable Component ─── */
+export default function GameTable() {
+  const params = useParams<{ id: string }>();
+  const tableId = parseInt(params.id || '1');
+  const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const { connected, gameState, mySeatIndex, error, joinTable, leaveTable, sendAction, sendChat, timeOffset } = useSocket();
+  const { data: tableConfig } = trpc.tables.get.useQuery({ id: tableId });
+
+  // Raise state
+  const [raiseAmount, setRaiseAmount] = useState(0);
+  const [showRaisePanel, setShowRaisePanel] = useState(false);
+  // Pre-action
+  const [preAction, setPreAction] = useState<string | null>(null);
+  // Showdown
+  const [showdownOverlay, setShowdownOverlay] = useState<any>(null);
+
+  // Auto-join
+  useEffect(() => {
+    console.log('[GameTable] Auto-join check:', { connected, hasUser: !!user, userId: user?.id, tableId });
+    if (connected && user && tableId) {
+      console.log('[GameTable] Calling joinTable:', tableId, user.id);
+      joinTable(tableId, user.id);
+    }
+  }, [connected, user, tableId, joinTable]);
+
+  // Auto-leave on unmount
+  useEffect(() => {
+    return () => { if (tableId) leaveTable(tableId); };
+  }, [tableId, leaveTable]);
+
+  // Initialize raise amount
+  useEffect(() => {
+    if (gameState) {
+      setRaiseAmount(gameState.minRaise || gameState.bigBlind * 2);
+    }
+  }, [gameState?.minRaise, gameState?.bigBlind]);
+
+  // Execute pre-action when it's our turn
+  useEffect(() => {
+    if (!gameState || !preAction || mySeatIndex < 0) return;
+    if (gameState.actionSeat !== mySeatIndex) return;
+
+    const heroPlayer = gameState.players.find(p => p.seatIndex === mySeatIndex);
+    if (!heroPlayer) return;
+
+    const toCall = gameState.currentBet - heroPlayer.currentBet;
+
+    if (preAction === 'check_fold') {
+      sendAction(tableId, toCall > 0 ? 'fold' : 'check');
+    } else if (preAction === 'call_any') {
+      sendAction(tableId, toCall > 0 ? 'call' : 'check');
+    } else if (preAction === 'fold_to_bet') {
+      if (toCall > 0) sendAction(tableId, 'fold');
+    }
+    setPreAction(null);
+  }, [gameState?.actionSeat, preAction, mySeatIndex]);
+
+  // Showdown detection
+  useEffect(() => {
+    if (gameState?.phase === 'showdown') {
+      const winners = gameState.players.filter(p => !p.folded && p.holeCards.length > 0);
+      if (winners.length > 0) {
+        setShowdownOverlay({
+          winners,
+          pots: gameState.pots,
+        });
+        setTimeout(() => setShowdownOverlay(null), 4000);
+      }
+    }
+  }, [gameState?.phase, gameState?.handNumber]);
+
+  // Derived state
+  const maxSeats = tableConfig ? parseInt(tableConfig.tableSize) : 6;
+  const seats = getSeats(maxSeats);
+  const heroPlayer = gameState?.players.find(p => p.seatIndex === mySeatIndex);
+  const isMyTurn = gameState?.actionSeat === mySeatIndex && mySeatIndex >= 0;
+  const toCall = heroPlayer ? gameState!.currentBet - heroPlayer.currentBet : 0;
+  const canCheck = toCall <= 0;
+  const totalPot = gameState ? gameState.pots.reduce((s, p) => s + p.amount, 0) + gameState.players.reduce((s, p) => s + p.currentBet, 0) : 0;
+
+  // Action handlers
+  const handleFold = useCallback(() => { sendAction(tableId, 'fold'); setShowRaisePanel(false); }, [tableId, sendAction]);
+  const handleCall = useCallback(() => { sendAction(tableId, 'call'); setShowRaisePanel(false); }, [tableId, sendAction]);
+  const handleCheck = useCallback(() => { sendAction(tableId, 'check'); setShowRaisePanel(false); }, [tableId, sendAction]);
+  const handleRaise = useCallback(() => { sendAction(tableId, 'raise', raiseAmount); setShowRaisePanel(false); }, [tableId, sendAction, raiseAmount]);
+  const handleAllIn = useCallback(() => {
+    if (heroPlayer) sendAction(tableId, 'raise', heroPlayer.chipStack + heroPlayer.currentBet);
+    setShowRaisePanel(false);
+  }, [tableId, sendAction, heroPlayer]);
+
+  const handleSit = useCallback((seatIdx: number) => {
+    if (user) joinTable(tableId, user.id, seatIdx);
+  }, [user, tableId, joinTable]);
+
+  // Raise presets
+  const bb = gameState?.bigBlind || 2;
+  const minR = gameState?.minRaise || bb * 2;
+  const maxR = heroPlayer ? heroPlayer.chipStack + heroPlayer.currentBet : 0;
+
+  return (
+    <div className="h-[100dvh] w-full flex flex-col overflow-hidden relative"
+      style={{ background: '#0A0A12' }}>
+
+      {/* Background */}
+      <TableBackground />
+
+      {/* ─── Top Bar ─── */}
+      <div className="relative z-40 flex items-center justify-between px-3 py-2 safe-area-top"
+        style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%)' }}>
+        <div className="flex items-center gap-2">
+          <button onClick={() => navigate('/lobby')} className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+            style={{ background: 'rgba(255,255,255,0.06)' }}>
+            <ArrowLeft size={16} />
+          </button>
+          {user && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full"
+              style={{ background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.15)' }}>
+              <img src={ASSETS.ui.coin} alt="" className="w-3.5 h-3.5" />
+              <span className="text-xs font-bold text-amber-300 font-mono-poker">
+                {formatChipAmount(heroPlayer?.chipStack || 0)}
               </span>
             </div>
           )}
-          <div className="px-1.5 py-0.5 rounded-md flex items-center gap-1" style={{
-            background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.06)',
-          }}>
-            {connected ? <Wifi size={8} className="text-emerald-400" /> : <WifiOff size={8} className="text-red-400" />}
-            <Users size={8} className="text-gray-500" />
-            <span className="text-[8px] text-gray-500 font-mono-poker">{gameState.players.length}/{tableSize}</span>
+        </div>
+
+        {/* Timer */}
+        {gameState && gameState.actionDeadline > 0 && gameState.phase !== 'waiting' && (
+          <CountdownTimer deadline={gameState.actionDeadline} serverOffset={timeOffset} />
+        )}
+
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 text-[10px] text-gray-500">
+            {connected ? <Wifi size={10} className="text-green-500" /> : <WifiOff size={10} className="text-red-500" />}
+            <Users size={10} />
+            <span>{gameState?.players.length || 0}/{maxSeats}</span>
           </div>
+          <button className="w-7 h-7 rounded-full flex items-center justify-center text-gray-500 hover:text-gray-300"
+            style={{ background: 'rgba(255,255,255,0.04)' }}>
+            <Settings size={13} />
+          </button>
         </div>
       </div>
 
-      {/* ─── Table Area — takes most of the screen ─── */}
-      <div className="relative z-10 overflow-hidden" style={{ minHeight: 0 }} ref={tableRef}>
-        <div className="absolute inset-0 flex items-center justify-center p-1">
-          <div className="relative w-full h-full" style={{ maxWidth: 480, maxHeight: '100%' }}>
+      {/* ─── Game Info Bar ─── */}
+      <div className="relative z-30 flex items-center justify-center gap-2 py-1">
+        <span className="text-[10px] font-medium text-gray-500 tracking-wider">
+          NLH ~ {tableConfig?.smallBlind || 1}/{tableConfig?.bigBlind || 2} {maxSeats}MAX
+        </span>
+        <span className="text-[9px] text-gray-600">•</span>
+        <span className="text-[10px] font-medium uppercase tracking-wider"
+          style={{ color: gameState?.phase === 'showdown' ? '#D4AF37' : '#6B7280' }}>
+          {PHASE_LABELS[gameState?.phase || 'waiting']} #{gameState?.handNumber || 0}
+        </span>
+      </div>
 
-            {/* ─── Poker Table — Oval with white glowing border (TON Poker style) ─── */}
-            <div className="absolute" style={{ left: '16%', right: '16%', top: '12%', bottom: '14%' }}>
-              {/* Outer glow */}
-              <div className="absolute -inset-1" style={{
-                borderRadius: '50%',
-                boxShadow: '0 0 40px rgba(255,255,255,0.15), 0 0 80px rgba(255,255,255,0.06), 0 0 120px rgba(255,255,255,0.03)',
+      {/* ─── TABLE AREA (flex-1) ─── */}
+      <div className="flex-1 relative z-10 mx-auto w-full" style={{ maxWidth: '420px' }}>
+        {/* Table oval */}
+        <div className="absolute inset-2 flex items-center justify-center">
+          <div className="relative w-full h-full">
+            {/* Outer glow */}
+            <div className="absolute inset-0 rounded-[50%]" style={{
+              background: 'transparent',
+              boxShadow: '0 0 60px rgba(255,255,255,0.06), 0 0 120px rgba(212,175,55,0.03)',
+            }} />
+
+            {/* White border ring */}
+            <div className="absolute inset-0 rounded-[50%]" style={{
+              border: '2.5px solid rgba(255,255,255,0.2)',
+              boxShadow: '0 0 30px rgba(255,255,255,0.08), 0 0 60px rgba(255,255,255,0.04), inset 0 0 30px rgba(255,255,255,0.03)',
+            }} />
+
+            {/* Dark felt surface */}
+            <div className="absolute inset-[3px] rounded-[50%] overflow-hidden" style={{
+              background: 'radial-gradient(ellipse at 50% 35%, #1a3a28 0%, #142e1f 25%, #0d2216 50%, #091a10 75%, #06120b 100%)',
+              boxShadow: 'inset 0 0 80px rgba(0,0,0,0.5)',
+            }}>
+              {/* Subtle felt texture */}
+              <div className="absolute inset-0 opacity-[0.03]" style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 64 64' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
               }} />
-              {/* Table outer rim — dark wood */}
+
+              {/* Center light spot */}
               <div className="absolute inset-0" style={{
-                borderRadius: '50%',
-                background: 'linear-gradient(180deg, #2a2420 0%, #1a1614 50%, #0e0c0a 100%)',
-                border: '2.5px solid rgba(255,255,255,0.45)',
-                boxShadow: `
-                  0 0 40px rgba(0,0,0,0.8),
-                  0 0 25px rgba(255,255,255,0.12),
-                  0 0 60px rgba(255,255,255,0.06),
-                  inset 0 0 30px rgba(0,0,0,0.3)
-                `,
-              }}>
-                {/* White glowing inner border */}
-                <div className="absolute inset-[3px]" style={{
-                  borderRadius: '50%',
-                  border: '2px solid rgba(255,255,255,0.35)',
-                  boxShadow: '0 0 25px rgba(255,255,255,0.12), 0 0 50px rgba(255,255,255,0.05)',
-                }} />
-                {/* Green felt */}
-                <div className="absolute" style={{
-                  left: '5%', right: '5%', top: '5%', bottom: '5%',
-                  borderRadius: '50%',
-                  background: 'radial-gradient(ellipse at 50% 35%, #4aad6a 0%, #3a9a58 15%, #2d8a48 35%, #1f7838 60%, #166428 85%, #0e5020 100%)',
-                  boxShadow: 'inset 0 0 50px rgba(0,0,0,0.35), inset 0 -8px 25px rgba(0,0,0,0.15)',
-                }}>
-                  {/* Felt texture overlay */}
-                  <div className="absolute inset-0 rounded-[50%] opacity-[0.03]" style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg width='6' height='6' viewBox='0 0 6 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 5h1v1H1V5zm2-2h1v1H3V3zm2-2h1v1H5V1z' fill='%23ffffff' fill-opacity='0.3'/%3E%3C/svg%3E")`,
-                  }} />
-                  {/* Light spot */}
-                  <div className="absolute inset-0 rounded-[50%]" style={{
-                    background: 'radial-gradient(ellipse at 50% 32%, rgba(255,255,255,0.06) 0%, transparent 50%)',
-                  }} />
+                background: 'radial-gradient(ellipse at 50% 40%, rgba(30,80,45,0.3) 0%, transparent 50%)',
+              }} />
+            </div>
+
+            {/* ─── "TEXAS HOLD'EM" center text ─── */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="text-center" style={{ transform: 'translateY(10%)' }}>
+                <div className="text-[11px] font-display font-bold tracking-[0.3em] uppercase"
+                  style={{ color: 'rgba(212,175,55,0.12)' }}>
+                  Texas Hold'em
                 </div>
               </div>
-            </div>
-
-            {/* ─── Table info label (like TON Poker) ─── */}
-            <div className="absolute left-1/2 -translate-x-1/2 z-5" style={{ top: '60%' }}>
-              <div className="px-3 py-0.5 rounded-full text-[7px] text-white/20 font-mono-poker tracking-wider"
-                style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                NLH ~ {gameState.smallBlind}/{gameState.bigBlind} {tableSize}MAX
-              </div>
-            </div>
-
-            {/* ─── HOUSE POKER watermark on table ─── */}
-            <div className="absolute left-1/2 -translate-x-1/2 z-5 opacity-[0.06]" style={{ top: '52%', transform: 'translate(-50%, -50%)' }}>
-              <span className="text-lg font-display font-bold tracking-[0.2em] text-white">HOUSE POKER</span>
             </div>
 
             {/* ─── Pot Display ─── */}
             {totalPot > 0 && (
-              <motion.div
-                initial={{ scale: 0 }} animate={{ scale: 1 }}
-                className="absolute left-1/2 -translate-x-1/2 z-10 flex flex-col items-center"
-                style={{ top: '30%' }}
-              >
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full" style={{
-                  background: 'rgba(0,0,0,0.75)',
-                  border: '1px solid rgba(212,175,55,0.3)',
-                  boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
+              <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2.5 py-1 rounded-full"
+                style={{
+                  top: '30%',
+                  background: 'rgba(0,0,0,0.6)',
+                  border: '1px solid rgba(212,175,55,0.2)',
+                  backdropFilter: 'blur(8px)',
                 }}>
-                  {/* Pot icon */}
-                  <svg width="14" height="14" viewBox="0 0 14 14">
-                    <circle cx="7" cy="7" r="6" fill="#D4AF37" stroke="#B8941F" strokeWidth="0.5" />
-                    <circle cx="7" cy="7" r="3.5" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="0.5" />
-                    <circle cx="7" cy="7" r="1.5" fill="rgba(255,255,255,0.15)" />
-                  </svg>
-                  <span className="text-xs font-bold text-gold font-mono-poker">
-                    {totalPot.toLocaleString()}
-                  </span>
-                </div>
-                {hasMultiplePots && (
-                  <div className="flex gap-1 mt-0.5">
-                    {gameState.pots.filter(p => p.amount > 0).map((pot, i) => (
-                      <span key={i} className="text-[6px] px-1 py-0.5 rounded-full text-gray-400 font-mono-poker"
-                        style={{ background: 'rgba(0,0,0,0.5)' }}>
-                        {i === 0 ? 'Main' : `Side ${i}`}: {pot.amount}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </motion.div>
+                <img src={ASSETS.ui.trophy} alt="" className="w-3.5 h-3.5" />
+                <span className="text-xs font-bold text-amber-300 font-mono-poker">{formatChipAmount(totalPot)}</span>
+              </div>
             )}
 
             {/* ─── Community Cards ─── */}
-            <div className="absolute left-1/2 flex gap-1 sm:gap-1.5 z-10" style={{ top: '44%', transform: 'translate(-50%, -50%)' }}>
-              <AnimatePresence>
+            {gameState && gameState.communityCards.length > 0 && (
+              <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-1"
+                style={{ top: '42%', transform: 'translate(-50%, -50%)' }}>
                 {gameState.communityCards.map((card, i) => (
-                  <motion.div key={`cc-${i}`}
-                    initial={{ y: -12, opacity: 0, scale: 0.7 }}
-                    animate={{ y: 0, opacity: 1, scale: 1 }}
-                    transition={{ delay: i * 0.1, type: 'spring', stiffness: 200 }}>
-                    <PokerCard card={card as Card} size="sm" delay={i * 0.08} />
-                  </motion.div>
+                  <PokerCard key={`cc-${i}`} card={card} size="md" delay={i * 0.08} />
                 ))}
-              </AnimatePresence>
-              {gameState.communityCards.length < 5 && gameState.phase !== 'waiting' && (
-                Array.from({ length: 5 - gameState.communityCards.length }).map((_, i) => (
-                  <div key={`e-${i}`} style={{
-                    width: 32, height: 46,
-                    background: 'rgba(255,255,255,0.015)',
-                    border: '1px dashed rgba(255,255,255,0.04)',
-                    borderRadius: 4,
-                  }} />
-                ))
-              )}
-            </div>
-
-            {/* ─── Bet Pills ─── */}
-            {orderedPlayers.map(player => {
-              if (player.currentBet <= 0) return null;
-              const pos = seats[player.vi] || seats[0];
-              const betPos = getBetPos(pos);
-              return <BetPill key={`bet-${player.seatIndex}`} amount={player.currentBet} pos={betPos} />;
-            })}
+                {/* Placeholder slots for remaining cards */}
+                {Array.from({ length: 5 - gameState.communityCards.length }).map((_, i) => (
+                  <div key={`empty-${i}`} className="w-[44px] h-[63px] rounded-md"
+                    style={{ background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.05)' }} />
+                ))}
+              </div>
+            )}
 
             {/* ─── Player Seats ─── */}
-            {orderedPlayers.map(player => {
-              const pos = seats[player.vi] || seats[0];
+            {seats.map((seatPos, seatIdx) => {
+              const player = gameState?.players.find(p => p.seatIndex === seatIdx) || null;
+              const isHero = seatIdx === mySeatIndex;
+              const isDealer = gameState?.dealerSeat === seatIdx;
+              const isSB = gameState?.smallBlindSeat === seatIdx;
+              const isBB = gameState?.bigBlindSeat === seatIdx;
+              const isActive = gameState?.actionSeat === seatIdx;
+
               return (
-                <SeatView
-                  key={player.seatIndex}
+                <PlayerSeat
+                  key={seatIdx}
                   player={player}
-                  pos={pos}
-                  isAction={gameState.actionSeat === player.seatIndex && gameState.phase !== 'showdown'}
-                  isDealer={gameState.dealerSeat === player.seatIndex}
-                  isSB={gameState.smallBlindSeat === player.seatIndex}
-                  isBB={gameState.bigBlindSeat === player.seatIndex}
-                  isHero={player.seatIndex === heroSeat}
-                  isShowdown={gameState.phase === 'showdown'}
-                  isWinner={!!player.lastAction?.startsWith('WIN')}
-                  timerPct={gameState.actionSeat === player.seatIndex ? timerPct : 0}
+                  isHero={isHero}
+                  isDealer={isDealer}
+                  isSB={isSB}
+                  isBB={isBB}
+                  isActive={isActive}
+                  seatPos={seatPos}
+                  maxSeats={maxSeats}
+                  onSit={() => handleSit(seatIdx)}
                 />
               );
             })}
 
-            {/* ─── Empty Seats ─── */}
-            {Array.from({ length: tableSize }).map((_, i) => {
-              const vi = heroSeat >= 0 ? (i - heroSeat + tableSize) % tableSize : i;
-              if (occupiedSeats.has(i)) return null;
-              if (vi === 0 && heroSeat >= 0) return null;
-              const pos = seats[vi] || seats[0];
-              return (
-                <EmptySeat key={`empty-${i}`} pos={pos} seatIndex={i}
-                  onSit={() => toast.info('Seat selection coming soon')} />
-              );
+            {/* ─── Bet Pills ─── */}
+            {gameState?.players.map(player => {
+              if (player.currentBet <= 0) return null;
+              const seatPos = seats[player.seatIndex];
+              if (!seatPos) return null;
+              const bp = getBetPos(seatPos.x, seatPos.y);
+              return <BetPill key={`bet-${player.seatIndex}`} amount={player.currentBet} x={bp.x} y={bp.y} />;
             })}
-          </div>
-        </div>
-
-        {/* ─── Hero Cards — overlaid at bottom of table area ─── */}
-        <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
-          <div className="flex justify-center pb-2">
-            {heroPlayer && !heroPlayer.folded && heroPlayer.holeCards && heroPlayer.holeCards.length > 0 ? (
-              <div className="flex gap-2 pointer-events-auto">
-                {heroPlayer.holeCards.map((card, i) => (
-                  <motion.div key={`hero-${i}-${card.rank}-${card.suit}`}
-                    whileHover={{ y: -6, scale: 1.08 }}
-                    transition={{ type: 'spring', stiffness: 300 }}>
-                    <PokerCard card={card as Card} size="md" delay={i * 0.1} />
-                  </motion.div>
-                ))}
-              </div>
-            ) : heroPlayer?.folded ? (
-              <span className="text-[10px] text-gray-500 tracking-wider uppercase bg-black/50 px-3 py-1 rounded-full">Folded</span>
-            ) : gameState.phase === 'waiting' ? null : (
-              <span className="text-[10px] text-gray-500 bg-black/50 px-3 py-1 rounded-full">Waiting for cards...</span>
-            )}
           </div>
         </div>
       </div>
 
-      {/* ─── Showdown Winner Overlay ─── */}
-      <AnimatePresence>
-        {gameState.phase === 'showdown' && gameState.players.some(p => p.lastAction?.startsWith('WIN')) && (
+      {/* ─── HERO CARDS ─── */}
+      {heroPlayer && heroPlayer.holeCards.length > 0 && !heroPlayer.folded && (
+        <div className="relative z-30 flex justify-center -mt-4 mb-1">
+          <div className="flex gap-1.5">
+            {heroPlayer.holeCards.map((card, i) => (
+              <motion.div
+                key={`hero-${i}`}
+                initial={{ y: 30, opacity: 0, rotateY: 90 }}
+                animate={{ y: 0, opacity: 1, rotateY: 0 }}
+                transition={{ delay: i * 0.15, type: 'spring', stiffness: 200 }}
+              >
+                <PokerCard card={card} size="xl" animate={false} />
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Hero folded indicator */}
+      {heroPlayer && heroPlayer.folded && (
+        <div className="relative z-30 flex justify-center -mt-2 mb-1">
+          <span className="text-[10px] text-gray-600 font-medium tracking-wider">FOLDED</span>
+        </div>
+      )}
+
+      {/* ─── ACTION PANEL ─── */}
+      <div className="relative z-40 px-3 pb-3 safe-area-bottom"
+        style={{
+          background: 'linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 70%, transparent 100%)',
+        }}>
+
+        {/* YOUR TURN indicator */}
+        {isMyTurn && (
           <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
-            style={{ background: 'rgba(0,0,0,0.5)' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center mb-1.5"
+          >
+            <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-amber-400">Your Turn</span>
+          </motion.div>
+        )}
+
+        {/* Raise preset panel */}
+        <AnimatePresence>
+          {showRaisePanel && isMyTurn && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="mb-2"
+            >
+              {/* Presets row */}
+              <div className="flex gap-1.5 mb-2">
+                {[
+                  { label: 'Min', value: minR },
+                  { label: '3BB', value: bb * 3 },
+                  { label: '5BB', value: bb * 5 },
+                  { label: 'All In', value: maxR },
+                ].map(preset => (
+                  <button
+                    key={preset.label}
+                    onClick={() => setRaiseAmount(Math.min(preset.value, maxR))}
+                    className="flex-1 py-1.5 rounded-lg text-[10px] font-bold text-gray-300 transition-colors"
+                    style={{
+                      background: raiseAmount === Math.min(preset.value, maxR)
+                        ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.04)',
+                      border: raiseAmount === Math.min(preset.value, maxR)
+                        ? '1px solid rgba(212,175,55,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                    }}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Slider + amount */}
+              <div className="flex items-center gap-2 mb-2">
+                <button onClick={() => setRaiseAmount(Math.max(minR, raiseAmount - bb))}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-lg font-bold text-gray-400"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  −
+                </button>
+                <input
+                  type="range"
+                  min={minR}
+                  max={maxR}
+                  value={raiseAmount}
+                  onChange={e => setRaiseAmount(Number(e.target.value))}
+                  className="flex-1 h-1.5 rounded-full appearance-none"
+                  style={{
+                    background: `linear-gradient(to right, #D4AF37 0%, #D4AF37 ${((raiseAmount - minR) / (maxR - minR)) * 100}%, rgba(255,255,255,0.1) ${((raiseAmount - minR) / (maxR - minR)) * 100}%, rgba(255,255,255,0.1) 100%)`,
+                  }}
+                />
+                <button onClick={() => setRaiseAmount(Math.min(maxR, raiseAmount + bb))}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-lg font-bold text-gray-400"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  +
+                </button>
+              </div>
+
+              {/* Raise amount display + BACK/RAISE buttons */}
+              <div className="flex gap-2">
+                <button onClick={() => setShowRaisePanel(false)}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold text-gray-400 tracking-wider"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  BACK
+                </button>
+                <button onClick={handleRaise}
+                  className="flex-[2] py-2.5 rounded-xl text-xs font-bold tracking-wider text-black"
+                  style={{
+                    background: 'linear-gradient(135deg, #F5E6A3, #D4AF37, #B8941F)',
+                    boxShadow: '0 4px 16px rgba(212,175,55,0.3)',
+                  }}>
+                  RAISE {formatChipAmount(raiseAmount)}
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Main action buttons */}
+        {isMyTurn && !showRaisePanel && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex gap-2"
+          >
+            {/* FOLD */}
+            <button onClick={handleFold}
+              className="flex-1 py-3 rounded-xl text-sm font-bold tracking-wider transition-all active:scale-95"
+              style={{
+                background: 'linear-gradient(180deg, #374151 0%, #1F2937 100%)',
+                border: '1px solid #4B5563',
+                color: '#D1D5DB',
+              }}>
+              FOLD
+            </button>
+
+            {/* CHECK / CALL */}
+            {canCheck ? (
+              <button onClick={handleCheck}
+                className="flex-1 py-3 rounded-xl text-sm font-bold tracking-wider transition-all active:scale-95"
+                style={{
+                  background: 'linear-gradient(180deg, #1E40AF 0%, #1E3A8A 100%)',
+                  border: '1px solid #2563EB',
+                  color: '#BFDBFE',
+                }}>
+                CHECK
+              </button>
+            ) : (
+              <button onClick={handleCall}
+                className="flex-1 py-3 rounded-xl text-sm font-bold tracking-wider transition-all active:scale-95"
+                style={{
+                  background: 'linear-gradient(180deg, #1E40AF 0%, #1E3A8A 100%)',
+                  border: '1px solid #2563EB',
+                  color: '#BFDBFE',
+                }}>
+                CALL {formatChipAmount(toCall)}
+              </button>
+            )}
+
+            {/* RAISE */}
+            <button onClick={() => setShowRaisePanel(true)}
+              className="flex-1 py-3 rounded-xl text-sm font-bold tracking-wider transition-all active:scale-95"
+              style={{
+                background: 'linear-gradient(180deg, #166534 0%, #14532D 100%)',
+                border: '1px solid #16A34A',
+                color: '#BBF7D0',
+              }}>
+              RAISE
+            </button>
+
+            {/* ALL-IN */}
+            <button onClick={handleAllIn}
+              className="flex-1 py-3 rounded-xl text-sm font-bold tracking-wider transition-all active:scale-95"
+              style={{
+                background: 'linear-gradient(180deg, #991B1B 0%, #7F1D1D 100%)',
+                border: '1px solid #DC2626',
+                color: '#FCA5A5',
+              }}>
+              ALL-IN
+            </button>
+          </motion.div>
+        )}
+
+        {/* Pre-action buttons (when not our turn) */}
+        {!isMyTurn && heroPlayer && !heroPlayer.folded && gameState?.phase !== 'waiting' && gameState?.phase !== 'showdown' && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPreAction(preAction === 'check_fold' ? null : 'check_fold')}
+              className={`flex-1 py-2.5 rounded-xl text-[11px] font-bold tracking-wider transition-all ${preAction === 'check_fold' ? 'ring-1 ring-amber-400' : ''}`}
+              style={{
+                background: preAction === 'check_fold' ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                color: preAction === 'check_fold' ? '#D4AF37' : '#6B7280',
+              }}>
+              Check/Fold
+            </button>
+            <button
+              onClick={() => setPreAction(preAction === 'call_any' ? null : 'call_any')}
+              className={`flex-1 py-2.5 rounded-xl text-[11px] font-bold tracking-wider transition-all ${preAction === 'call_any' ? 'ring-1 ring-amber-400' : ''}`}
+              style={{
+                background: preAction === 'call_any' ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                color: preAction === 'call_any' ? '#D4AF37' : '#6B7280',
+              }}>
+              Call Any
+            </button>
+            <button
+              onClick={() => setPreAction(preAction === 'fold_to_bet' ? null : 'fold_to_bet')}
+              className={`flex-1 py-2.5 rounded-xl text-[11px] font-bold tracking-wider transition-all ${preAction === 'fold_to_bet' ? 'ring-1 ring-amber-400' : ''}`}
+              style={{
+                background: preAction === 'fold_to_bet' ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                color: preAction === 'fold_to_bet' ? '#D4AF37' : '#6B7280',
+              }}>
+              Fold to Bet
+            </button>
+          </div>
+        )}
+
+        {/* Waiting state */}
+        {gameState?.phase === 'waiting' && (
+          <div className="text-center py-2">
+            <span className="text-xs text-gray-500 tracking-wider">Waiting for players...</span>
+          </div>
+        )}
+
+        {/* Chat/emoji buttons */}
+        <div className="flex items-center justify-between mt-2 px-1">
+          <div className="flex gap-2">
+            <button className="w-8 h-8 rounded-full flex items-center justify-center text-gray-600 hover:text-gray-400 transition-colors"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.04)' }}
+              onClick={() => toast('Chat coming soon')}>
+              <MessageCircle size={14} />
+            </button>
+            <button className="w-8 h-8 rounded-full flex items-center justify-center text-gray-600 hover:text-gray-400 transition-colors"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.04)' }}
+              onClick={() => toast('Emojis coming soon')}>
+              <Smile size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Showdown Overlay ─── */}
+      <AnimatePresence>
+        {showdownOverlay && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none"
+            style={{ background: 'rgba(0,0,0,0.4)' }}
           >
             <motion.div
-              initial={{ scale: 0.5, opacity: 0 }}
+              initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 200, delay: 0.3 }}
-              className="rounded-2xl p-5 mx-4 text-center max-w-xs"
+              exit={{ scale: 0.8, opacity: 0 }}
+              className="rounded-2xl px-6 py-4 text-center"
               style={{
-                background: 'linear-gradient(145deg, rgba(16,16,28,0.95), rgba(8,8,16,0.98))',
-                border: '1px solid rgba(212,175,55,0.25)',
-                boxShadow: '0 0 60px rgba(212,175,55,0.15)',
+                background: 'linear-gradient(145deg, rgba(20,20,35,0.95) 0%, rgba(10,10,20,0.98) 100%)',
+                border: '1px solid rgba(212,175,55,0.2)',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(212,175,55,0.1)',
               }}
             >
-              <img src={ASSETS.ui.trophy} alt="" className="w-12 h-12 mx-auto mb-2" />
-              {gameState.players.filter(p => p.lastAction?.startsWith('WIN')).map(w => (
-                <div key={w.seatIndex}>
-                  <h2 className="text-lg font-bold gold-text font-display">
-                    {w.seatIndex === heroSeat ? 'YOU WIN!' : `${w.name} WINS!`}
-                  </h2>
-                  {w.lastAction && w.lastAction !== 'WIN' && (
-                    <div className="text-xs text-gold-light/70 mt-1">{w.lastAction.replace('WIN - ', '')}</div>
-                  )}
+              <div className="text-[10px] tracking-[0.3em] uppercase text-gray-500 mb-2">Showdown</div>
+              {showdownOverlay.winners.map((w: ServerPlayer, i: number) => (
+                <div key={i} className="flex items-center gap-3 mb-2">
+                  <img
+                    src={ASSETS.avatars[(w.avatar || 'fox') as keyof typeof ASSETS.avatars] || ASSETS.avatars.fox}
+                    alt="" className="w-8 h-8 rounded-full"
+                    style={{ border: '1.5px solid #D4AF37' }}
+                  />
+                  <div className="text-left">
+                    <div className="text-xs font-bold text-white">{w.name}</div>
+                    <div className="flex gap-1 mt-0.5">
+                      {w.holeCards.map((c, j) => (
+                        <PokerCard key={j} card={c} size="sm" animate delay={j * 0.1} />
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ))}
-              <div className="text-[9px] text-gray-600 mt-3 tracking-wider">Next hand starting...</div>
+              {showdownOverlay.pots.map((pot: any, i: number) => (
+                <div key={i} className="text-xs text-amber-300 font-bold font-mono-poker mt-1">
+                  Pot: {formatChipAmount(pot.amount)}
+                </div>
+              ))}
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ─── Action Panel — TON Poker style buttons ─── */}
-      <div className="shrink-0 relative z-30" style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)', minHeight: 70 }}>
-        {gameState.phase === 'waiting' ? (
-          <div className="px-3 py-2.5 text-center" style={{
-            background: 'rgba(4,4,6,0.95)', borderTop: '1px solid rgba(255,255,255,0.04)',
-          }}>
-            <div className="text-sm text-gray-400 font-medium">Waiting for players...</div>
-            <div className="text-[10px] text-gray-600 mt-0.5 font-mono-poker">{gameState.players.length} / {tableSize} seated</div>
-          </div>
-        ) : isMyTurn ? (
-          <div className="px-3 py-2" style={{
-            background: 'linear-gradient(0deg, rgba(4,4,6,0.98) 0%, rgba(4,4,6,0.95) 100%)',
-            borderTop: '1px solid rgba(212,175,55,0.2)',
-          }}>
-            {/* Raise panel */}
-            <AnimatePresence>
-              {showRaise && (
-                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                  {/* Preset buttons: Min, 3BB, 5BB, All In */}
-                  <div className="flex gap-1.5 mb-2 justify-center">
-                    {raisePresets.map(p => (
-                      <button key={p.label} onClick={() => setRaiseAmount(p.value)}
-                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                          raiseAmount === p.value ? 'text-black' : 'text-gray-400 hover:text-gray-200'
-                        }`}
-                        style={{
-                          background: raiseAmount === p.value
-                            ? 'linear-gradient(135deg, #D4AF37, #B8941F)'
-                            : 'rgba(255,255,255,0.06)',
-                          border: raiseAmount === p.value
-                            ? '1px solid rgba(212,175,55,0.5)'
-                            : '1px solid rgba(255,255,255,0.08)',
-                        }}>
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-                  {/* Raise amount + slider + buttons */}
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="text-right" style={{ minWidth: 50 }}>
-                      <div className="text-[8px] text-gray-500">Raise :</div>
-                      <div className="text-xs font-bold text-gold font-mono-poker">{formatChipAmount(raiseAmount)}</div>
-                    </div>
-                    <input type="range"
-                      min={Math.max(gameState.currentBet + minRaise, gameState.bigBlind)}
-                      max={maxRaise}
-                      value={raiseAmount}
-                      onChange={e => setRaiseAmount(parseInt(e.target.value))}
-                      className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
-                      style={{
-                        background: `linear-gradient(to right, #D4AF37 0%, #D4AF37 ${((raiseAmount - gameState.bigBlind) / Math.max(maxRaise - gameState.bigBlind, 1)) * 100}%, rgba(255,255,255,0.06) ${((raiseAmount - gameState.bigBlind) / Math.max(maxRaise - gameState.bigBlind, 1)) * 100}%, rgba(255,255,255,0.06) 100%)`,
-                      }}
-                    />
-                    {/* - and + buttons */}
-                    <button onClick={() => setRaiseAmount(Math.max(gameState.currentBet + minRaise, raiseAmount - gameState.bigBlind))}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 text-sm font-bold"
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                      −
-                    </button>
-                    <button onClick={() => setRaiseAmount(Math.min(maxRaise, raiseAmount + gameState.bigBlind))}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 text-sm font-bold"
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                      +
-                    </button>
-                  </div>
-                  {/* BACK + RAISE buttons */}
-                  <div className="flex gap-2 mb-2">
-                    <button onClick={() => setShowRaise(false)}
-                      className="flex-1 py-2.5 rounded-xl text-xs font-bold tracking-wider transition-all active:scale-95"
-                      style={{
-                        background: 'rgba(255,255,255,0.04)',
-                        color: '#9CA3AF',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                      }}>
-                      BACK
-                    </button>
-                    <button onClick={() => handleAction('raise', raiseAmount)}
-                      className="flex-[2] py-2.5 rounded-xl text-xs font-bold tracking-wider transition-all active:scale-95"
-                      style={{
-                        background: 'linear-gradient(135deg, #D4AF37, #9A7B1F)',
-                        color: '#0a0a0f',
-                        boxShadow: '0 2px 12px rgba(212,175,55,0.3)',
-                        border: '1px solid rgba(212,175,55,0.4)',
-                      }}>
-                      RAISE
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* ─── Main action buttons — TON Poker style ─── */}
-            {!showRaise && (
-              <div className="flex gap-2">
-                {/* FOLD — red outline */}
-                <button onClick={() => handleAction('fold')}
-                  className="flex-1 py-3 rounded-xl font-bold transition-all active:scale-95 tracking-wider text-xs"
-                  style={{
-                    background: 'transparent',
-                    color: '#F87171',
-                    border: '2px solid rgba(239,68,68,0.5)',
-                    boxShadow: '0 0 12px rgba(239,68,68,0.1)',
-                  }}>
-                  Fold
-                </button>
-
-                {/* CALL / CHECK — white/light */}
-                {canCheck ? (
-                  <button onClick={() => handleAction('check')}
-                    className="flex-1 py-3 rounded-xl font-bold transition-all active:scale-95 tracking-wider text-xs"
-                    style={{
-                      background: 'rgba(255,255,255,0.08)',
-                      color: '#E5E7EB',
-                      border: '2px solid rgba(255,255,255,0.2)',
-                    }}>
-                    Check
-                  </button>
-                ) : (
-                  <button onClick={() => handleAction('call')}
-                    className="flex-[1.5] py-3 rounded-xl font-bold transition-all active:scale-95 tracking-wider text-xs"
-                    style={{
-                      background: 'rgba(255,255,255,0.08)',
-                      color: '#E5E7EB',
-                      border: '2px solid rgba(255,255,255,0.2)',
-                    }}>
-                    Call {formatChipAmount(callAmount)}
-                  </button>
-                )}
-
-                {/* BET / RAISE — neutral */}
-                <button onClick={() => setShowRaise(true)}
-                  className="flex-1 py-3 rounded-xl font-bold transition-all active:scale-95 tracking-wider text-xs"
-                  style={{
-                    background: 'rgba(255,255,255,0.04)',
-                    color: '#9CA3AF',
-                    border: '2px solid rgba(255,255,255,0.1)',
-                  }}>
-                  {canCheck ? 'Bet' : 'Raise'}
-                </button>
-
-                {/* CHECK — if can check, show it */}
-                {!canCheck && (
-                  <button onClick={() => handleAction('check')}
-                    className="flex-1 py-3 rounded-xl font-bold transition-all active:scale-95 tracking-wider text-xs"
-                    style={{
-                      background: 'rgba(255,255,255,0.04)',
-                      color: '#6B7280',
-                      border: '2px solid rgba(255,255,255,0.06)',
-                      display: canCheck ? 'block' : 'none',
-                    }}>
-                    Check
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Chat/emoji buttons at bottom */}
-            {!showRaise && (
-              <div className="flex items-center justify-between mt-1.5">
-                <div className="flex gap-1.5">
-                  <button className="w-8 h-8 rounded-full flex items-center justify-center"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
-                    onClick={() => toast.info('Chat coming soon')}>
-                    <MessageCircle size={13} className="text-gray-500" />
-                  </button>
-                  <button className="w-8 h-8 rounded-full flex items-center justify-center"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
-                    onClick={() => toast.info('Emojis coming soon')}>
-                    <Smile size={13} className="text-gray-500" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          /* NOT YOUR TURN — pre-action buttons */
-          <div className="px-3 py-2" style={{
-            background: 'rgba(4,4,6,0.95)', borderTop: '1px solid rgba(255,255,255,0.04)',
-          }}>
-            {heroPlayer?.folded ? (
-              <div className="text-center py-1">
-                <span className="text-[10px] text-gray-600 tracking-wider">Folded — waiting for next hand</span>
-              </div>
-            ) : gameState.phase === 'showdown' ? (
-              <div className="text-center py-1">
-                <span className="text-[10px] text-gray-500">Showdown — revealing cards...</span>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <div className="text-center text-[9px] text-gray-600">
-                  Waiting for {gameState.players.find(p => p.seatIndex === gameState.actionSeat)?.name || 'opponent'}...
-                </div>
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => setPreAction(preAction === 'check_fold' ? null : 'check_fold')}
-                    className="flex-1 py-2 rounded-xl text-[10px] font-bold transition-all tracking-wider"
-                    style={{
-                      background: preAction === 'check_fold' ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.03)',
-                      color: preAction === 'check_fold' ? '#FEB2B2' : '#6B7280',
-                      border: preAction === 'check_fold' ? '1px solid rgba(220,38,38,0.3)' : '1px solid rgba(255,255,255,0.06)',
-                    }}
-                  >
-                    {preAction === 'check_fold' ? '✓ ' : ''}Check/Fold
-                  </button>
-                  <button
-                    onClick={() => setPreAction(preAction === 'call_any' ? null : 'call_any')}
-                    className="flex-1 py-2 rounded-xl text-[10px] font-bold transition-all tracking-wider"
-                    style={{
-                      background: preAction === 'call_any' ? 'rgba(72,187,120,0.1)' : 'rgba(255,255,255,0.03)',
-                      color: preAction === 'call_any' ? '#9AE6B4' : '#6B7280',
-                      border: preAction === 'call_any' ? '1px solid rgba(72,187,120,0.3)' : '1px solid rgba(255,255,255,0.06)',
-                    }}
-                  >
-                    {preAction === 'call_any' ? '✓ ' : ''}Call Any
-                  </button>
-                  <button
-                    onClick={() => setPreAction(preAction === 'fold_to_bet' ? null : 'fold_to_bet')}
-                    className="flex-1 py-2 rounded-xl text-[10px] font-bold transition-all tracking-wider"
-                    style={{
-                      background: preAction === 'fold_to_bet' ? 'rgba(237,137,54,0.1)' : 'rgba(255,255,255,0.03)',
-                      color: preAction === 'fold_to_bet' ? '#FEEBC8' : '#6B7280',
-                      border: preAction === 'fold_to_bet' ? '1px solid rgba(237,137,54,0.3)' : '1px solid rgba(255,255,255,0.06)',
-                    }}
-                  >
-                    {preAction === 'fold_to_bet' ? '✓ ' : ''}Fold to Bet
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Error toast */}
+      {error && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-xs text-red-300"
+          style={{ background: 'rgba(127,29,29,0.9)', border: '1px solid rgba(220,38,38,0.3)' }}>
+          {error}
+        </div>
+      )}
     </div>
   );
 }
