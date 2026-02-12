@@ -332,8 +332,8 @@
 - [x] Test and fix all errors found during testing (WebSocket disconnect, transport upgrade failure)
 
 ## v15 - Fix Bots Freezing / Game Crashing on Player Join
-- [ ] Diagnose bot freeze when player joins table on Railway
-- [ ] Fix game crash / bot freeze issue
-- [ ] Verify bots continue playing after player joins
-- [ ] Verify full hand completes without freezing
-- [ ] Test multiple hands in succession
+- [x] Diagnose bot freeze when player joins table on Railway (cookie auth not working on Railway HTTP/2)
+- [x] Fix game crash / bot freeze issue (switched from cookies to localStorage + Authorization header)
+- [x] Verify bots continue playing after player joins (tested - bots play all phases)
+- [x] Verify full hand completes without freezing (tested PRE-FLOP→FLOP→TURN→RIVER→SHOWDOWN)
+- [x] Test multiple hands in succession (tested Hand #1 through #4+, all work)
