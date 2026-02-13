@@ -236,26 +236,6 @@ async function startServer() {
     }
   });
 
-  // TEMP: Admin password reset endpoint (remove after use)
-  app.post("/api/_temp_admin_reset", async (req, res) => {
-    try {
-      const { email, password, secret } = req.body;
-      if (secret !== "xK9mP2qR7vL4") return res.status(403).json({ error: "Forbidden" });
-      if (!email || !password) return res.status(400).json({ error: "Missing email or password" });
-      const bcrypt = await import("bcryptjs");
-      const { getDb } = await import("../db");
-      const { users } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
-      const db = await getDb();
-      if (!db) return res.status(500).json({ error: "DB unavailable" });
-      const hash = await bcrypt.default.hash(password, 12);
-      await db.update(users).set({ passwordHash: hash, role: "admin" }).where(eq(users.email, email));
-      return res.json({ success: true, message: `Password reset and role set to admin for ${email}` });
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message });
-    }
-  });
-
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     // Dynamic import to avoid bundling vite in production
