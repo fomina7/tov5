@@ -274,7 +274,6 @@ class GameManager {
     room.state.players.push(player);
     room.sockets.set(seatIndex, socket.id);
     room.userSockets.set(data.userId, socket.id);
-
     socket.join(`table_${data.tableId}`);
     (socket as any).__tableId = data.tableId;
     (socket as any).__seatIndex = seatIndex;
@@ -390,7 +389,12 @@ class GameManager {
     if (!room || room.state.phase === "waiting" || room.state.phase === "showdown") return;
 
     const actionPlayer = room.state.players.find(p => p.seatIndex === room.state.actionSeat);
-    if (!actionPlayer) return;
+    if (!actionPlayer) {
+        // If no action player, something is wrong, try to advance phase
+        console.log(`[Game] No action player found for seat ${room.state.actionSeat}, advancing phase.`);
+        this.handlePlayerAction(null as any, { tableId, action: "check" }); // Force a check to move forward
+        return;
+    }
 
     if (actionPlayer.isBot) {
       this.scheduleBotAction(tableId);
@@ -409,7 +413,7 @@ class GameManager {
     const existingTimer = room.botTimers.get(actionPlayer.seatIndex);
     if (existingTimer) clearTimeout(existingTimer);
 
-    const thinkTime = 800 + Math.random() * 1500;
+    const thinkTime = 1500 + Math.random() * 2000; // Give some time for players to see
     const timer = setTimeout(() => {
       try {
         const botAction = getBotAction(room.state, actionPlayer);
@@ -446,6 +450,10 @@ class GameManager {
 
     const actionPlayer = room.state.players.find(p => p.seatIndex === room.state.actionSeat);
     if (!actionPlayer || actionPlayer.isBot) return;
+
+    // Set deadline for client
+    room.state.actionDeadline = Date.now() + 30000;
+    this.broadcastState(tableId);
 
     room.actionTimer = setTimeout(() => {
       console.log(`[Timer] Auto-fold for seat ${room.state.actionSeat} at table ${tableId}`);
@@ -507,15 +515,15 @@ class GameManager {
     const room = this.tables.get(data.tableId);
     if (!room) return;
 
-    const seatIndex = (socket as any).__seatIndex;
+    const seatIndex = socket ? (socket as any).__seatIndex : room.state.actionSeat;
     if (seatIndex === undefined || seatIndex !== room.state.actionSeat) {
-      socket.emit("error", { message: "Not your turn" });
+      if (socket) socket.emit("error", { message: "Not your turn" });
       return;
     }
 
     const validActions = ["fold", "check", "call", "raise", "allin"];
     if (!validActions.includes(data.action)) {
-      socket.emit("error", { message: "Invalid action" });
+      if (socket) socket.emit("error", { message: "Invalid action" });
       return;
     }
 
@@ -566,7 +574,6 @@ class GameManager {
       const room = this.tables.get(tableId);
       if (room) {
         // Only mark as disconnected if this socket is still the current one for this seat
-        // (prevents marking reconnected player as disconnected when old socket fires disconnect)
         const currentSocketForSeat = room.sockets.get(seatIndex);
         if (currentSocketForSeat !== disconnectedSocketId) {
           console.log(`[WS] Ignoring stale disconnect for seat ${seatIndex} (current socket: ${currentSocketForSeat}, disconnected: ${disconnectedSocketId})`);
@@ -770,281 +777,6 @@ class GameManager {
     }
     room.botTimers.clear();
   }
-
-  // ─── Public API for tRPC / Admin ───────────────────────
-  getTableState(tableId: number, seatIndex: number) {
-    const room = this.tables.get(tableId);
-    if (!room) return null;
-    return sanitizeForPlayer(room.state, seatIndex);
-  }
-
-  // Get game state for a specific user (finds their seat automatically)
-  getTableStateForUser(tableId: number, userId: number) {
-    const room = this.tables.get(tableId);
-    if (!room) return null;
-    const player = room.state.players.find(p => p.oddsUserId === userId);
-    const seatIndex = player ? player.seatIndex : -1;
-    return { state: sanitizeForPlayer(room.state, seatIndex), seatIndex };
-  }
-
-  // Process player action via HTTP (fallback for socket.io issues)
-  processHttpAction(tableId: number, userId: number, action: string, amount?: number): { success: boolean; error?: string } {
-    const room = this.tables.get(tableId);
-    if (!room) return { success: false, error: "Table not found" };
-
-    const player = room.state.players.find(p => p.oddsUserId === userId);
-    if (!player) return { success: false, error: "Player not at table" };
-
-    if (player.seatIndex !== room.state.actionSeat) {
-      return { success: false, error: "Not your turn" };
-    }
-
-    const validActions = ["fold", "check", "call", "raise", "allin"];
-    if (!validActions.includes(action)) {
-      return { success: false, error: "Invalid action" };
-    }
-
-    if (room.actionTimer) clearTimeout(room.actionTimer);
-
-    console.log(`[HTTP-Action] User ${userId} seat ${player.seatIndex} at table ${tableId}: ${action}${amount ? ` ${amount}` : ''}`);
-
-    room.state = processAction(room.state, player.seatIndex, action as any, amount);
-    this.broadcastState(tableId);
-
-    if (room.state.phase === "showdown") {
-      this.handleShowdown(tableId);
-    } else {
-      this.scheduleNextAction(tableId);
-    }
-
-    return { success: true };
-  }
-
-  // Join table via HTTP (fallback)
-  async httpJoinTable(tableId: number, userId: number): Promise<{ success: boolean; seatIndex?: number; error?: string }> {
-    const db = await getDb();
-    if (!db) return { success: false, error: "No DB" };
-
-    const [tableConfig] = await db.select().from(gameTables).where(eq(gameTables.id, tableId));
-    if (!tableConfig) return { success: false, error: "Table not found" };
-
-    const [user] = await db.select().from(users).where(eq(users.id, userId));
-    if (!user) return { success: false, error: "User not found" };
-
-    const maxSeats = parseInt(tableConfig.tableSize);
-    let room = this.tables.get(tableId);
-
-    // Check if user is already at the table
-    if (room) {
-      const existingPlayer = room.state.players.find(p => p.oddsUserId === userId);
-      if (existingPlayer) {
-        existingPlayer.disconnected = false;
-        return { success: true, seatIndex: existingPlayer.seatIndex };
-      }
-    }
-
-    if (!room) {
-      const rakeConfig: RakeConfig = {
-        percentage: (tableConfig.rakePercentage || 5) / 100,
-        cap: tableConfig.rakeCap || tableConfig.bigBlind * 5,
-        minPotForRake: tableConfig.bigBlind * 4,
-      };
-      room = {
-        state: {
-          tableId,
-          phase: "waiting" as const,
-          communityCards: [],
-          deck: [],
-          currentBet: 0,
-          minRaise: tableConfig.bigBlind,
-          dealerSeat: 0,
-          smallBlindSeat: 0,
-          bigBlindSeat: 0,
-          actionSeat: -1,
-          smallBlind: tableConfig.smallBlind,
-          bigBlind: tableConfig.bigBlind,
-          handNumber: 0,
-          actionDeadline: 0,
-          players: [],
-          pots: [{ amount: 0, eligiblePlayerIds: [] }],
-          rake: rakeConfig,
-          rakeCollected: 0,
-          lastRaiserSeat: -1,
-          raisesThisStreet: 0,
-          totalPotBeforeRake: 0,
-        },
-        sockets: new Map(),
-        userSockets: new Map(),
-        botTimers: new Map(),
-        tableConfig,
-      };
-      this.tables.set(tableId, room);
-    }
-
-    // Find an empty seat
-    const occupiedSeats = room.state.players.map(p => p.seatIndex);
-    let seatIndex = -1;
-
-    // Remove a bot to make room
-    const bots = room.state.players.filter(p => p.isBot);
-    if (occupiedSeats.length >= maxSeats && bots.length > 0) {
-      const botToRemove = bots[bots.length - 1];
-      room.state.players = room.state.players.filter(p => p.seatIndex !== botToRemove.seatIndex);
-      seatIndex = botToRemove.seatIndex;
-    } else {
-      for (let s = 0; s < maxSeats; s++) {
-        if (!occupiedSeats.includes(s)) { seatIndex = s; break; }
-      }
-    }
-
-    if (seatIndex === -1) return { success: false, error: "Table full" };
-
-    const buyIn = Math.min(user.balanceReal || 0, tableConfig.maxBuyIn || tableConfig.bigBlind * 100);
-    if (buyIn < (tableConfig.minBuyIn || tableConfig.bigBlind * 20)) {
-      return { success: false, error: "Insufficient balance" };
-    }
-
-    // Deduct buy-in
-    await db.update(users).set({ balanceReal: sql`balanceReal - ${buyIn}` }).where(eq(users.id, userId));
-
-    const newPlayer: PlayerState = {
-      oddsUserId: userId,
-      seatIndex,
-      name: user.nickname || user.name || `Player_${userId}`,
-      avatar: user.avatar || "default",
-      chipStack: buyIn,
-      currentBet: 0,
-      totalBetThisHand: 0,
-      holeCards: [],
-      folded: true,
-      allIn: false,
-      isBot: false,
-      lastAction: undefined,
-      disconnected: false,
-      sittingOut: false,
-      hasActedThisRound: false,
-    };
-    room.state.players.push(newPlayer);
-
-    // Fill bots if needed
-    if (tableConfig.botsEnabled !== false) {
-      await this.fillBotsIfNeeded(room, maxSeats, tableConfig);
-    }
-
-    this.broadcastState(tableId);
-
-    // Start game if enough players
-    const activePlayers = room.state.players.filter(p => p.chipStack > 0);
-    if (activePlayers.length >= 2 && room.state.phase === "waiting") {
-      this.startNewHand(tableId);
-    }
-
-    return { success: true, seatIndex };
-  }
-
-  getAdminTableState(tableId: number) {
-    const room = this.tables.get(tableId);
-    if (!room) return null;
-    return sanitizeForAdmin(room.state);
-  }
-
-  getAllActiveTableIds(): number[] {
-    return Array.from(this.tables.keys());
-  }
-
-  getActiveTableCount(): number {
-    return this.tables.size;
-  }
-
-  getOnlinePlayerCount(): number {
-    let count = 0;
-    for (const room of Array.from(this.tables.values())) {
-      count += room.state.players.filter((p: PlayerState) => !p.isBot && !p.disconnected).length;
-    }
-    return count;
-  }
-
-  // Admin: get all table states for monitoring
-  getAllTableStates(): any[] {
-    const result: any[] = [];
-    for (const [tableId, room] of Array.from(this.tables.entries())) {
-      result.push({
-        tableId,
-        phase: room.state.phase,
-        handNumber: room.state.handNumber,
-        playerCount: room.state.players.length,
-        humanCount: room.state.players.filter(p => !p.isBot).length,
-        botCount: room.state.players.filter(p => p.isBot).length,
-        totalPot: room.state.pots.reduce((s, p) => s + p.amount, 0) +
-          room.state.players.reduce((s, p) => s + p.currentBet, 0),
-        rakeCollected: room.state.rakeCollected,
-      });
-    }
-    return result;
-  }
-
-  // Admin: add/remove bots from a specific table
-  async adminAddBot(tableId: number, botName?: string, difficulty?: string): Promise<boolean> {
-    const room = this.tables.get(tableId);
-    if (!room) return false;
-
-    const maxSeats = parseInt(room.tableConfig?.tableSize || "6");
-    const occupiedSeats = room.state.players.map(p => p.seatIndex);
-    let seatIndex = -1;
-    for (let s = 0; s < maxSeats; s++) {
-      if (!occupiedSeats.includes(s)) { seatIndex = s; break; }
-    }
-    if (seatIndex === -1) return false;
-
-    const botIdx = room.state.players.filter(p => p.isBot).length;
-    const bot: PlayerState = {
-      oddsUserId: null,
-      seatIndex,
-      name: botName || DEFAULT_BOT_NAMES[botIdx % DEFAULT_BOT_NAMES.length],
-      avatar: DEFAULT_BOT_AVATARS[botIdx % DEFAULT_BOT_AVATARS.length],
-      chipStack: room.state.bigBlind * 100,
-      currentBet: 0,
-      totalBetThisHand: 0,
-      holeCards: [],
-      folded: true,
-      allIn: false,
-      isBot: true,
-      botDifficulty: (difficulty as any) || "medium",
-      lastAction: undefined,
-      disconnected: false,
-      sittingOut: false,
-      hasActedThisRound: false,
-    };
-    room.state.players.push(bot);
-    this.broadcastState(tableId);
-    return true;
-  }
-
-  async adminRemoveBot(tableId: number, seatIndex: number): Promise<boolean> {
-    const room = this.tables.get(tableId);
-    if (!room) return false;
-
-    const player = room.state.players.find(p => p.seatIndex === seatIndex && p.isBot);
-    if (!player) return false;
-
-    room.state.players = room.state.players.filter(p => p.seatIndex !== seatIndex);
-    this.broadcastState(tableId);
-    return true;
-  }
-
-  // Admin: force start a new hand
-  adminForceNewHand(tableId: number): boolean {
-    const room = this.tables.get(tableId);
-    if (!room) return false;
-    this.clearAllTimers(room);
-    room.state.phase = "waiting";
-    if (room.state.players.filter(p => p.chipStack > 0).length >= 2) {
-      this.startNewHand(tableId);
-      return true;
-    }
-    return false;
-  }
 }
 
-// Singleton
 export const gameManager = new GameManager();
